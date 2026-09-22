@@ -1,0 +1,19 @@
+# InvoiceOCR Pipeline - Dependencies
+
+# OCR
+pytesseract>=0.3.10
+Pillow>=10.0.0           # Image preprocessing
+
+# PDF handling
+pdf2image>=1.16.3        # Convert PDF pages to images
+
+# Database
+# sqlite3 is built into Python — no extra package needed
+
+# Environment / config
+python-dotenv>=1.0.0
+
+# Email (stdlib smtplib is used; no extra package needed)
+
+# Image preprocessing
+opencv-python-headless>=4.8.0   # Deskew, denoise, contrast adjustments

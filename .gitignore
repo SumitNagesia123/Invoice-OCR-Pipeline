@@ -1,0 +1,30 @@
+# Environment
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Data (keep structure, ignore contents)
+input_invoices/*
+!input_invoices/.gitkeep
+processed_invoices/*
+!processed_invoices/.gitkeep
+failed_invoices/*
+!failed_invoices/.gitkeep
+ocr_output/*
+!ocr_output/.gitkeep
+logs/*
+!logs/.gitkeep
+data/*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
