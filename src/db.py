@@ -10,7 +10,7 @@ import sqlite3
 import logging
 from pathlib import Path
 
-from src.config import DATABASE_PATH
+from src import config
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +92,9 @@ CREATE INDEX IF NOT EXISTS idx_processing_logs_file_name
 
 def get_connection() -> sqlite3.Connection:
     """Return a connection to the SQLite database with FK enforcement."""
-    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DATABASE_PATH))
+    db_path = config.DATABASE_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA foreign_keys = ON;")
     conn.row_factory = sqlite3.Row
     return conn
