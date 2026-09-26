@@ -5,29 +5,36 @@ Automated batch processing pipeline for extracting and storing invoice data from
 ## About This Project
 The InvoiceOCR Pipeline is an automated, robust document processing system designed to bring order to unstructured invoice data. By integrating cutting-edge OCR technology with a proprietary parsing engine, it transforms disparate invoice documents into structured, queryable data. This project was developed as a comprehensive engineering solution to facilitate reliable data extraction, storage, and reporting.
 
-## Project Structure
-`	ext
+## 📁 Project Structure
+
+```
 Invoice-OCR-Pipeline/
-├── data/               # SQLite database storage
-├── input_invoices/     # Drop zone for new invoices
-├── processed_invoices/ # Folder for successfully parsed files
-├── failed_invoices/    # Folder for errors encountered during pipeline
-├── ocr_output/         # Intermediate raw OCR text files
-├── logs/               # Application-level logs
-├── src/                # Core application source code
-│   ├── config.py       # Configuration & Environment loading
-│   ├── db.py           # Schema initialization & connectivity
-│   ├── intake.py       # Intake, validation, sanitization
-│   ├── ocr.py          # Image processing & OCR engine
-│   ├── parser.py       # Data extraction & heuristic engine
-│   ├── storage.py      # Database interaction & validation
-│   └── reporter.py     # Email/Report generation logic
-├── tests/              # 270+ unit, integration, and edge-case tests
-├── init_db.py          # Database schema setup script
-├── run_pipeline.py     # Main application entry point
-├── dashboard.html      # Interactive web dashboard
-└── README.md           # This file
-`
+│
+├── data/                    # SQLite database storage
+├── input_invoices/          # Drop zone for new invoice files
+├── processed_invoices/      # Successfully parsed invoices
+├── failed_invoices/         # Files that failed processing
+├── ocr_output/              # Intermediate raw OCR text output
+├── logs/                    # Application-level logs
+│
+├── src/                     # Core application source code
+│   ├── config.py            # Configuration & environment loading
+│   ├── db.py                # Schema initialization & connectivity
+│   ├── intake.py            # File intake, validation, sanitization
+│   ├── ocr.py                # Image preprocessing & OCR engine
+│   ├── parser.py            # Field extraction & heuristic engine
+│   ├── storage.py           # Database interaction & validation
+│   └── reporter.py          # Email/report generation logic
+│
+├── tests/                   # 270+ unit, integration & edge-case tests
+│
+├── init_db.py               # Database schema setup script
+├── run_pipeline.py          # Main application entry point
+├── dashboard.html           # Interactive web dashboard
+├── requirements.txt         # Python dependencies
+├── .env.example              # Environment variable template
+└── README.md                 # Project documentation
+```
 
 ## Detailed Workflow Breakdown
 
@@ -72,6 +79,4 @@ Data is inserted into a normalized SQLite database after server-side validation.
 - Run: python run_pipeline.py.
 - Open dashboard.html in your browser to view processing status and database reports.
 
-## Project Structure Diagram
-![Project Structure Diagram](structure.md)
 
