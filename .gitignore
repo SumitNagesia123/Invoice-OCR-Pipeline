@@ -28,3 +28,7 @@ data/*.db
 Thumbs.db
 .DS_Store
 desktop.ini
+.env
+data/*.db
+venv/
+__pycache__/

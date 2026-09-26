@@ -49,7 +49,11 @@ def sanitize_filename(name: str) -> str:
 
 
 def _is_valid_image(file_path: Path) -> bool:
-    """Return True if Pillow can open and verify the image."""
+    """Return True if Pillow can open and verify the image.
+
+    This function confirms that the file is not empty and possesses
+    a valid, non-corrupted image signature (TIFF, JPEG, PNG, etc.).
+    """
     try:
         with Image.open(file_path) as img:
             img.verify()
