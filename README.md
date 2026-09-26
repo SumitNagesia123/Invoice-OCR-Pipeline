@@ -2,62 +2,81 @@
 
 Automated batch processing pipeline for extracting and storing invoice data from images and PDFs using Tesseract OCR and SQLite.
 
-## 🚀 Live Dashboard
-View the project dashboard here: [https://SumitNagesia123.github.io/Invoice-OCR-Pipeline/dashboard.html](https://SumitNagesia123.github.io/Invoice-OCR-Pipeline/dashboard.html)
+## About This Project
+The InvoiceOCR Pipeline is an automated, robust document processing system designed to bring order to unstructured invoice data. By integrating cutting-edge OCR technology with a proprietary parsing engine, it transforms disparate invoice documents into structured, queryable data. This project was developed as a comprehensive engineering solution to facilitate reliable data extraction, storage, and reporting.
 
-## 📖 About This Project
-The **InvoiceOCR Pipeline** is an enterprise-grade automated document processing system. In modern business, managing hundreds or thousands of physical or PDF invoices manually is a bottleneck—prone to human error, slow, and expensive to scale.
+## 📁 Project Structure
 
-This project was engineered to solve that bottleneck. It provides a reliable, modular, and automated pipeline that transforms unstructured invoice documents (images and PDFs) into structured, queryable relational data. 
+```
+Invoice-OCR-Pipeline/
+│
+├── data/                    # SQLite database storage
+├── input_invoices/          # Drop zone for new invoice files
+├── processed_invoices/      # Successfully parsed invoices
+├── failed_invoices/         # Files that failed processing
+├── ocr_output/              # Intermediate raw OCR text output
+├── logs/                    # Application-level logs
+│
+├── src/                     # Core application source code
+│   ├── config.py            # Configuration & environment loading
+│   ├── db.py                # Schema initialization & connectivity
+│   ├── intake.py            # File intake, validation, sanitization
+│   ├── ocr.py                # Image preprocessing & OCR engine
+│   ├── parser.py            # Field extraction & heuristic engine
+│   ├── storage.py           # Database interaction & validation
+│   └── reporter.py          # Email/report generation logic
+│
+├── tests/                   # 270+ unit, integration & edge-case tests
+│
+├── init_db.py               # Database schema setup script
+├── run_pipeline.py          # Main application entry point
+├── dashboard.html           # Interactive web dashboard
+├── requirements.txt         # Python dependencies
+├── .env.example              # Environment variable template
+└── README.md                 # Project documentation
+```
 
-### Why this project?
-- **Efficiency**: Reduces document processing time from minutes to milliseconds.
-- **Accuracy**: Employs advanced image preprocessing (OpenCV) and fine-tuned heuristic parsing to maximize data extraction fidelity.
-- **Robustness**: Designed with a production-first mentality, including full deduplication, path-traversal protection, and extensive test coverage (270+ tests).
-- **Transparency**: Includes a real-time, interactive web dashboard to monitor pipeline health and processing logs.
+## Detailed Workflow Breakdown
 
-## 🏗️ Project Structure
-`mermaid
-graph TD
-    subgraph Core ["InvoiceOCR Pipeline"]
-        A[run_pipeline.py] --> B[src/intake.py]
-        B --> C[src/ocr.py]
-        C --> D[src/parser.py]
-        D --> E[src/storage.py]
-        E --> F[(data/invoices.db)]
-        E --> G[processed_invoices/]
-        B --> H[failed_invoices/]
-        C --> I[ocr_output/]
-    end
-    subgraph Config ["Configuration & Utils"]
-        J[src/config.py] -.-> B
-        J -.-> C
-        J -.-> E
-        K[init_db.py] --> F
-    end
-    subgraph UI ["Dashboard"]
-        M[dashboard.html] -.-> F
-    end
-`
+### 1. Intake and Validation
+The pipeline begins by scanning input_invoices/. Every incoming file undergoes several checks before processing:
+- **Format Validation**: Only PNG, JPG, TIFF, and PDF are accepted.
+- **Sanitization**: Filenames are sanitized to prevent path-traversal attacks.
+- **Deduplication**: A SHA-256 hash is computed for each file and compared against the database to ensure no duplicate documents are processed.
 
-### Folder Breakdown
-- data/: SQLite database storage containing processed document records.
-- input_invoices/: The ingestion "drop zone" for new files.
-- processed_invoices/: Archive for successfully parsed and stored files.
-- ailed_invoices/: Catch-all for files that failed validation or parsing.
-- ocr_output/: Intermediate storage for raw extracted text.
-- src/: Core application source code.
-- 	ests/: 270+ unit, integration, and edge-case tests.
+### 2. OCR Preprocessing and Extraction
+Once validated, images are prepared for OCR:
+- **Preprocessing**: Using OpenCV, images are converted to grayscale, denoised, contrast-normalized (CLAHE), and deskewed.
+- **OCR Engine**: Tesseract (v5+) extracts text from the enhanced images.
+- **PDF Handling**: PDFs are converted to images using Poppler prior to text extraction.
 
-## ⚙️ Detailed Workflow
-1. **Intake**: Automatically ingests files, validates formats (PNG/JPG/PDF), sanitizes filenames, and deduplicates using hashes.
-2. **OCR Engine**: Applies grayscale, denoising, contrast-normalization, and deskewing using OpenCV before Tesseract 5.4.0 extracts text.
-3. **Parser**: Uses an intelligent heuristic regex engine to map messy OCR output to structured fields like Invoice Number, Vendor, Date, and Line Items.
-4. **Storage**: Performs server-side validation before committing data to SQLite.
+### 3. Parsing and Heuristics
+The parsing engine takes the raw OCR text and attempts to structure it:
+- **Regex Extraction**: Uses regex heuristics to identify Vendor Names, Invoice IDs, Dates (standardized to ISO YYYY-MM-DD), and Amount (Total + Currency).
+- **Confidence Scoring**: Each invoice receives a confidence score (High/Medium/Low) based on the number of successfully extracted key fields.
 
-## 🛠️ Setup Instructions
-1. **Install Prerequisites**: Python 3.10+, [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki), and [Poppler](https://github.com/oschwartz10612/poppler-windows/releases) (for PDF support).
-2. **Setup Env**: python -m venv venv, .\venv\Scripts\activate, pip install -r requirements.txt.
-3. **Configure**: Copy .env.example to .env and set TESSERACT_CMD and DATABASE_PATH.
-4. **Initialize**: Run python init_db.py.
-5. **Run**: Place invoices in input_invoices/ and execute python run_pipeline.py.
+### 4. Relational Storage
+Data is inserted into a normalized SQLite database after server-side validation.
+- **Document Table**: Stores file metadata, parsed invoice fields, and status.
+- **Line Item Table**: Stores individual line items linked via foreign key to the document.
+- **Audit Logs**: Every processing attempt is logged with start/end times and error messaging for debugging.
+
+## Setup Instructions
+
+### Prerequisites
+- Python 3.10+
+- Tesseract OCR (v5.x+)
+- Poppler (for PDF support)
+
+### Installation
+1. Clone: git clone https://github.com/SumitNagesia123/Invoice-OCR-Pipeline.git
+2. Install: pip install -r requirements.txt
+3. Configure: Copy .env.example to .env and fill the variables (Tesseract path, DB path).
+4. Initialize DB: python init_db.py
+
+### Usage
+- Add files to input_invoices/.
+- Run: python run_pipeline.py.
+- Open dashboard.html in your browser to view processing status and database reports.
+
+
