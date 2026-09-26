@@ -46,14 +46,14 @@ graph TD
 - processed_invoices/: Archive for successfully parsed and stored files.
 - ailed_invoices/: Catch-all for files that failed validation or parsing.
 - ocr_output/: Intermediate storage for raw extracted text.
-- src/: Core logic modules (Intake, OCR, Parser, Storage, etc.).
-- 	ests/: 270+ unit, integration, and edge-case tests ensuring high-quality output.
+- src/: Core application source code.
+- 	ests/: 270+ unit, integration, and edge-case tests.
 
 ## ⚙️ Detailed Workflow
-1. **Intake**: Automatically ingests files, validates formats (PNG/JPG/PDF), sanitizes filenames, and deduplicates using SHA-256 hashes.
-2. **OCR Engine**: Applies grayscale, denoising, contrast-normalization, and deskewing using OpenCV before Tesseract 5.4.0 extracts the text.
+1. **Intake**: Automatically ingests files, validates formats (PNG/JPG/PDF), sanitizes filenames, and deduplicates using hashes.
+2. **OCR Engine**: Applies grayscale, denoising, contrast-normalization, and deskewing using OpenCV before Tesseract 5.4.0 extracts text.
 3. **Parser**: Uses an intelligent heuristic regex engine to map messy OCR output to structured fields like Invoice Number, Vendor, Date, and Line Items.
-4. **Storage**: Performs server-side validation on field types/formats before securely committing data to SQLite.
+4. **Storage**: Performs server-side validation before committing data to SQLite.
 
 ## 🛠️ Setup Instructions
 1. **Install Prerequisites**: Python 3.10+, [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki), and [Poppler](https://github.com/oschwartz10612/poppler-windows/releases) (for PDF support).
