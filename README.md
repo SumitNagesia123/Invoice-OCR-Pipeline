@@ -71,3 +71,7 @@ Data is inserted into a normalized SQLite database after server-side validation.
 - Add files to input_invoices/.
 - Run: python run_pipeline.py.
 - Open dashboard.html in your browser to view processing status and database reports.
+
+## Project Structure Diagram
+![Project Structure Diagram](structure.md)
+
