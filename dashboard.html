@@ -58,6 +58,8 @@
 
     <script>
         let dashboardData = null;
+        let currentPage = 1;
+        const itemsPerPage = 10;
 
         async function fetchDashboardData() {
             const response = await fetch('dashboard_data.json');
@@ -68,6 +70,38 @@
         function showView(viewId) {
             document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
             document.getElementById(viewId).classList.remove('hidden');
+        }
+
+        function changePage(delta) {
+            currentPage += delta;
+            renderTable();
+        }
+
+        function renderTable() {
+            const start = (currentPage - 1) * itemsPerPage;
+            const end = start + itemsPerPage;
+            const paginatedDocs = dashboardData.documents.slice(start, end);
+
+            const invoiceList = document.getElementById('invoice-list');
+            let tableHtml = `
+                <table class="w-full text-left mb-4">
+                    <thead><tr><th class="border-b p-2">Invoice #</th><th class="border-b p-2">Vendor</th><th class="border-b p-2">Total</th></tr></thead>
+                    <tbody>
+            `;
+            paginatedDocs.forEach(doc => {
+                tableHtml += `<tr><td class="border-b p-2">${doc.invoice_number}</td><td class="border-b p-2">${doc.vendor_name}</td><td class="border-b p-2">${doc.total_amount}</td></tr>`;
+            });
+            tableHtml += `</tbody></table>`;
+
+            // Pagination controls
+            tableHtml += `
+                <div class="flex justify-between items-center">
+                    <button onclick="changePage(-1)" ${currentPage === 1 ? 'disabled' : ''} class="px-4 py-2 bg-gray-200 rounded disabled:opacity-50">Previous</button>
+                    <span>Page ${currentPage} of ${Math.ceil(dashboardData.documents.length / itemsPerPage)}</span>
+                    <button onclick="changePage(1)" ${end >= dashboardData.documents.length ? 'disabled' : ''} class="px-4 py-2 bg-gray-200 rounded disabled:opacity-50">Next</button>
+                </div>
+            `;
+            invoiceList.innerHTML = tableHtml;
         }
 
         function renderDashboard() {
@@ -81,18 +115,7 @@
                 </div>
             `;
 
-            // Render Invoice Table
-            const invoiceList = document.getElementById('invoice-list');
-            let tableHtml = `
-                <table class="w-full text-left">
-                    <thead><tr><th class="border-b p-2">Invoice #</th><th class="border-b p-2">Vendor</th><th class="border-b p-2">Total</th></tr></thead>
-                    <tbody>
-            `;
-            dashboardData.documents.forEach(doc => {
-                tableHtml += `<tr><td class="border-b p-2">${doc.invoice_number}</td><td class="border-b p-2">${doc.vendor_name}</td><td class="border-b p-2">${doc.total_amount}</td></tr>`;
-            });
-            tableHtml += `</tbody></table>`;
-            invoiceList.innerHTML = tableHtml;
+            renderTable();
 
             // Render Chart
             const ctx = document.getElementById('invoiceChart').getContext('2d');
