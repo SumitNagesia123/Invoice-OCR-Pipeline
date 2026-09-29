@@ -27,6 +27,7 @@
             <div id="kpi-container" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <!-- KPI Cards go here -->
             </div>
+            <input type="text" id="search-input" placeholder="Search by Invoice # or Vendor..." class="w-full p-2 mb-4 border rounded" oninput="handleSearch(this.value)">
             <div class="bg-white p-4 rounded shadow mb-6">
                 <canvas id="invoiceChart"></canvas>
             </div>
@@ -59,6 +60,7 @@
     <script>
         let dashboardData = null;
         let currentPage = 1;
+        let searchTerm = '';
         const itemsPerPage = 10;
 
         async function fetchDashboardData() {
@@ -72,15 +74,26 @@
             document.getElementById(viewId).classList.remove('hidden');
         }
 
+        function handleSearch(value) {
+            searchTerm = value.toLowerCase();
+            currentPage = 1;
+            renderTable();
+        }
+
         function changePage(delta) {
             currentPage += delta;
             renderTable();
         }
 
         function renderTable() {
+            const filteredDocs = dashboardData.documents.filter(doc =>
+                doc.invoice_number.toLowerCase().includes(searchTerm) ||
+                doc.vendor_name.toLowerCase().includes(searchTerm)
+            );
+
             const start = (currentPage - 1) * itemsPerPage;
             const end = start + itemsPerPage;
-            const paginatedDocs = dashboardData.documents.slice(start, end);
+            const paginatedDocs = filteredDocs.slice(start, end);
 
             const invoiceList = document.getElementById('invoice-list');
             let tableHtml = `
@@ -97,8 +110,8 @@
             tableHtml += `
                 <div class="flex justify-between items-center">
                     <button onclick="changePage(-1)" ${currentPage === 1 ? 'disabled' : ''} class="px-4 py-2 bg-gray-200 rounded disabled:opacity-50">Previous</button>
-                    <span>Page ${currentPage} of ${Math.ceil(dashboardData.documents.length / itemsPerPage)}</span>
-                    <button onclick="changePage(1)" ${end >= dashboardData.documents.length ? 'disabled' : ''} class="px-4 py-2 bg-gray-200 rounded disabled:opacity-50">Next</button>
+                    <span>Page ${currentPage} of ${Math.max(1, Math.ceil(filteredDocs.length / itemsPerPage))}</span>
+                    <button onclick="changePage(1)" ${end >= filteredDocs.length ? 'disabled' : ''} class="px-4 py-2 bg-gray-200 rounded disabled:opacity-50">Next</button>
                 </div>
             `;
             invoiceList.innerHTML = tableHtml;
