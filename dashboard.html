@@ -38,22 +38,44 @@
 
         <div id="processing-logs" class="view hidden">
             <h2 class="text-2xl font-bold mb-4">Processing Logs</h2>
-            <p>Placeholder: Logs content</p>
+            <div class="bg-white p-4 rounded shadow">
+                <table class="w-full text-left">
+                    <thead><tr><th class="border-b p-2">File Name</th><th class="border-b p-2">Start Time</th><th class="border-b p-2">Status</th></tr></thead>
+                    <tbody>
+                        <tr><td class="p-2" colspan="3">No logs available (placeholder)</td></tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <div id="sql-tables" class="view hidden">
             <h2 class="text-2xl font-bold mb-4">SQL Tables</h2>
-            <p>Placeholder: SQL Tables content</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-white p-4 rounded shadow">
+                    <h3 class="font-bold">invoice_documents</h3>
+                    <p class="text-sm text-gray-600">Stores all processed invoice data.</p>
+                </div>
+                <div class="bg-white p-4 rounded shadow">
+                    <h3 class="font-bold">processing_logs</h3>
+                    <p class="text-sm text-gray-600">Tracks pipeline activity.</p>
+                </div>
+            </div>
         </div>
 
         <div id="dead-letter-queue" class="view hidden">
-            <h2 class="text-2xl font-bold mb-4">Dead Letter Queue</h2>
-            <p>Placeholder: DLQ content</p>
+            <h2 class="text-2xl font-bold mb-4">Dead Letter Queue (Failed Invoices)</h2>
+            <div class="bg-white p-4 rounded shadow text-gray-600">
+                List of failed invoices will appear here. No failed invoices currently.
+            </div>
         </div>
 
         <div id="settings" class="view hidden">
             <h2 class="text-2xl font-bold mb-4">Settings</h2>
-            <p>Placeholder: Settings content</p>
+            <div class="bg-white p-4 rounded shadow">
+                <h3 class="font-bold mb-2">Configuration</h3>
+                <p>Database: <code>data/invoices.db</code></p>
+                <p>Input Directory: <code>input_invoices/</code></p>
+            </div>
         </div>
     </main>
 
