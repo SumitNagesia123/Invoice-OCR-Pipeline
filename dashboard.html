@@ -1,949 +1,111 @@
-<title>InvoiceOCR</title>
-<meta name="color-scheme" content="light dark">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Serif+Text&family=Inter:wght@400;500;600;700&display=swap">
-<style>
-:root {
-  --bg: #F7F5F2;
-  --bg-raised: #FFFFFF;
-  --bg-inset: #EDEAE6;
-  --text: #1A1D26;
-  --text-secondary: #6B7A8D;
-  --primary: #2C3E6B;
-  --primary-light: #3A5090;
-  --accent: #D4913B;
-  --accent-soft: rgba(212,145,59,0.12);
-  --success: #3A8A5C;
-  --success-soft: rgba(58,138,92,0.10);
-  --error: #C0534F;
-  --error-soft: rgba(192,83,79,0.10);
-  --border: #D8D4CF;
-  --border-light: #E8E5E0;
-  --rail-bg: #2C3E6B;
-  --rail-text: rgba(255,255,255,0.6);
-  --rail-active: #FFFFFF;
-  --mono: 'Courier New', Consolas, monospace;
-  --display: 'DM Serif Text', Georgia, 'Times New Roman', serif;
-  --body: 'Inter', -apple-system, system-ui, sans-serif;
-  --shadow-sm: 0 1px 3px rgba(26,29,38,0.06);
-  --shadow-md: 0 4px 12px rgba(26,29,38,0.08);
-}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InvoiceOCR Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex">
+    <!-- Sidebar Navigation -->
+    <aside class="w-64 bg-gray-800 text-white min-h-screen p-4">
+        <h1 class="text-xl font-bold mb-6">Invoice OCR</h1>
+        <nav class="space-y-2">
+            <button onclick="showView('pipeline-dashboard')" class="block w-full text-left p-2 rounded hover:bg-gray-700">Pipeline Dashboard</button>
+            <button onclick="showView('processing-logs')" class="block w-full text-left p-2 rounded hover:bg-gray-700">Processing Logs</button>
+            <button onclick="showView('sql-tables')" class="block w-full text-left p-2 rounded hover:bg-gray-700">SQL Tables</button>
+            <button onclick="showView('dead-letter-queue')" class="block w-full text-left p-2 rounded hover:bg-gray-700">Dead Letter Queue</button>
+            <button onclick="showView('settings')" class="block w-full text-left p-2 rounded hover:bg-gray-700">Settings</button>
+        </nav>
+    </aside>
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #13151C;
-    --bg-raised: #1C1F2A;
-    --bg-inset: #0E1017;
-    --text: #E4E2DE;
-    --text-secondary: #8A9AAD;
-    --primary: #7B9ADB;
-    --primary-light: #96B1E8;
-    --accent: #E0A54E;
-    --accent-soft: rgba(224,165,78,0.14);
-    --success: #5BB87E;
-    --success-soft: rgba(91,184,126,0.12);
-    --error: #D97070;
-    --error-soft: rgba(217,112,112,0.12);
-    --border: #2A2D3A;
-    --border-light: #22252F;
-    --rail-bg: #0E1017;
-    --rail-text: rgba(255,255,255,0.4);
-    --rail-active: #E0A54E;
-    --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
-    --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #13151C;
-  --bg-raised: #1C1F2A;
-  --bg-inset: #0E1017;
-  --text: #E4E2DE;
-  --text-secondary: #8A9AAD;
-  --primary: #7B9ADB;
-  --primary-light: #96B1E8;
-  --accent: #E0A54E;
-  --accent-soft: rgba(224,165,78,0.14);
-  --success: #5BB87E;
-  --success-soft: rgba(91,184,126,0.12);
-  --error: #D97070;
-  --error-soft: rgba(217,112,112,0.12);
-  --border: #2A2D3A;
-  --border-light: #22252F;
-  --rail-bg: #0E1017;
-  --rail-text: rgba(255,255,255,0.4);
-  --rail-active: #E0A54E;
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
-}
-
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html { height: 100%; }
-body {
-  height: 100%;
-  font-family: var(--body);
-  font-size: 14px;
-  color: var(--text);
-  background: var(--bg);
-  display: flex;
-  overflow: hidden;
-}
-
-/* ── Rail ── */
-.rail {
-  width: 64px;
-  min-width: 64px;
-  background: var(--rail-bg);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 16px 0;
-  gap: 4px;
-  z-index: 10;
-}
-.rail-logo {
-  width: 36px; height: 36px;
-  margin-bottom: 20px;
-  display: flex; align-items: center; justify-content: center;
-}
-.rail-logo svg { width: 28px; height: 28px; }
-.rail-btn {
-  width: 44px; height: 44px;
-  border: none; background: transparent;
-  border-radius: 8px; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--rail-text);
-  transition: all 0.15s ease;
-  position: relative;
-}
-.rail-btn:hover { color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.08); }
-.rail-btn.active {
-  color: var(--rail-active);
-  background: rgba(255,255,255,0.12);
-}
-.rail-btn.active::before {
-  content: '';
-  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-  width: 3px; height: 20px;
-  background: var(--rail-active);
-  border-radius: 0 3px 3px 0;
-}
-.rail-btn svg { width: 20px; height: 20px; }
-.rail-spacer { flex: 1; }
-
-/* ── Main ── */
-.main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  min-width: 0;
-}
-.topbar {
-  height: 56px; min-height: 56px;
-  display: flex;
-  align-items: center;
-  padding: 0 28px;
-  border-bottom: 1px solid var(--border-light);
-  background: var(--bg);
-  gap: 16px;
-}
-.topbar h1 {
-  font-family: var(--display);
-  font-size: 20px;
-  font-weight: 400;
-  color: var(--text);
-  white-space: nowrap;
-}
-.topbar-sep {
-  width: 1px; height: 24px;
-  background: var(--border);
-}
-.topbar-section {
-  font-size: 13px;
-  color: var(--text-secondary);
-  font-weight: 500;
-  letter-spacing: 0.02em;
-}
-.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
-.badge {
-  display: inline-flex; align-items: center;
-  padding: 3px 10px;
-  border-radius: 100px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-.badge-success { background: var(--success-soft); color: var(--success); }
-.badge-error { background: var(--error-soft); color: var(--error); }
-.badge-accent { background: var(--accent-soft); color: var(--accent); }
-
-.content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 28px;
-}
-
-/* ── View: Overview ── */
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 28px;
-}
-.stat-card {
-  background: var(--bg-raised);
-  border: 1px solid var(--border-light);
-  border-radius: 10px;
-  padding: 20px 22px;
-  box-shadow: var(--shadow-sm);
-}
-.stat-label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-.stat-value {
-  font-family: var(--display);
-  font-size: 32px;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-.stat-sub {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-top: 4px;
-}
-
-.pipeline-section {
-  background: var(--bg-raised);
-  border: 1px solid var(--border-light);
-  border-radius: 10px;
-  padding: 24px 28px;
-  box-shadow: var(--shadow-sm);
-  margin-bottom: 28px;
-}
-.section-title {
-  font-family: var(--display);
-  font-size: 18px;
-  color: var(--text);
-  margin-bottom: 20px;
-}
-
-/* Pipeline diagram */
-.pipeline-flow {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  overflow-x: auto;
-  padding: 12px 0;
-}
-.pipe-stage {
-  display: flex; flex-direction: column;
-  align-items: center; gap: 8px;
-  min-width: 120px;
-}
-.pipe-icon {
-  width: 52px; height: 52px;
-  border-radius: 12px;
-  display: flex; align-items: center; justify-content: center;
-  border: 2px solid var(--border);
-  background: var(--bg-inset);
-  transition: all 0.2s;
-}
-.pipe-icon svg { width: 22px; height: 22px; color: var(--primary); }
-.pipe-stage.active .pipe-icon {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-.pipe-stage.active .pipe-icon svg { color: var(--accent); }
-.pipe-label {
-  font-size: 12px; font-weight: 600;
-  color: var(--text-secondary);
-  text-align: center;
-  letter-spacing: 0.02em;
-}
-.pipe-arrow {
-  flex-shrink: 0;
-  width: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--border);
-}
-.pipe-arrow svg { width: 20px; height: 20px; }
-
-/* ── View: Documents ── */
-.table-wrap {
-  background: var(--bg-raised);
-  border: 1px solid var(--border-light);
-  border-radius: 10px;
-  box-shadow: var(--shadow-sm);
-  overflow: hidden;
-}
-.table-wrap table {
-  width: 100%;
-  border-collapse: collapse;
-  font-variant-numeric: tabular-nums;
-}
-.table-wrap th {
-  text-align: left;
-  padding: 12px 16px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-  background: var(--bg-inset);
-  border-bottom: 1px solid var(--border-light);
-  white-space: nowrap;
-}
-.table-wrap td {
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border-light);
-  font-size: 13px;
-  color: var(--text);
-}
-.table-wrap tr:last-child td { border-bottom: none; }
-.table-wrap tr:hover td { background: var(--bg-inset); }
-
-.hash-cell {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--text-secondary);
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.amount-cell {
-  font-weight: 600;
-  color: var(--success);
-}
-
-/* ── View: OCR ── */
-.ocr-panel {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-}
-.ocr-block {
-  background: var(--bg-raised);
-  border: 1px solid var(--border-light);
-  border-radius: 10px;
-  box-shadow: var(--shadow-sm);
-  overflow: hidden;
-}
-.ocr-block-header {
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border-light);
-  background: var(--bg-inset);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-}
-.ocr-block-body {
-  padding: 20px;
-}
-.ocr-raw {
-  font-family: var(--mono);
-  font-size: 13px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  color: var(--text);
-}
-.parsed-field {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border-light);
-}
-.parsed-field:last-child { border-bottom: none; }
-.parsed-key {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.parsed-val {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text);
-  text-align: right;
-}
-
-/* ── View: Logs ── */
-.log-timeline {
-  position: relative;
-  padding-left: 28px;
-}
-.log-timeline::before {
-  content: '';
-  position: absolute;
-  left: 8px; top: 8px; bottom: 8px;
-  width: 2px;
-  background: var(--border);
-  border-radius: 1px;
-}
-.log-entry {
-  position: relative;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-light);
-  border-radius: 10px;
-  padding: 18px 22px;
-  margin-bottom: 16px;
-  box-shadow: var(--shadow-sm);
-}
-.log-entry::before {
-  content: '';
-  position: absolute;
-  left: -24px; top: 22px;
-  width: 10px; height: 10px;
-  border-radius: 50%;
-  border: 2px solid var(--success);
-  background: var(--bg);
-}
-.log-entry.log-fail::before { border-color: var(--error); }
-.log-header {
-  display: flex; align-items: center; gap: 10px;
-  margin-bottom: 12px;
-}
-.log-file { font-weight: 600; font-size: 14px; color: var(--text); }
-.log-meta {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 8px 24px;
-}
-.log-meta-item {
-  display: flex; gap: 8px; font-size: 12px;
-}
-.log-meta-label { color: var(--text-secondary); font-weight: 500; }
-.log-meta-value { color: var(--text); font-variant-numeric: tabular-nums; }
-
-/* ── View: Setup ── */
-.setup-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.setup-step {
-  background: var(--bg-raised);
-  border: 1px solid var(--border-light);
-  border-radius: 10px;
-  padding: 22px 24px;
-  box-shadow: var(--shadow-sm);
-}
-.step-num {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px;
-  border-radius: 7px;
-  background: var(--primary);
-  color: white;
-  font-size: 12px;
-  font-weight: 700;
-  margin-right: 12px;
-  vertical-align: middle;
-}
-.step-title {
-  font-weight: 600;
-  font-size: 15px;
-  color: var(--text);
-  display: inline;
-  vertical-align: middle;
-}
-.step-body {
-  margin-top: 12px;
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--text-secondary);
-}
-.step-body code {
-  font-family: var(--mono);
-  font-size: 12px;
-  background: var(--bg-inset);
-  border: 1px solid var(--border-light);
-  padding: 2px 6px;
-  border-radius: 4px;
-  color: var(--primary);
-}
-.code-block {
-  display: block;
-  background: var(--bg-inset);
-  border: 1px solid var(--border-light);
-  border-radius: 6px;
-  padding: 12px 16px;
-  margin-top: 10px;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  color: var(--text);
-  overflow-x: auto;
-}
-
-/* ── View: Architecture ── */
-.arch-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 16px;
-}
-.arch-card {
-  background: var(--bg-raised);
-  border: 1px solid var(--border-light);
-  border-radius: 10px;
-  padding: 20px 22px;
-  box-shadow: var(--shadow-sm);
-}
-.arch-card-icon {
-  width: 36px; height: 36px;
-  border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-  margin-bottom: 14px;
-  background: var(--accent-soft);
-}
-.arch-card-icon svg { width: 18px; height: 18px; color: var(--accent); }
-.arch-card h3 {
-  font-size: 14px; font-weight: 600;
-  color: var(--text);
-  margin-bottom: 6px;
-}
-.arch-card p {
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--text-secondary);
-}
-
-[hidden] { display: none !important; }
-
-/* ── Responsive ── */
-@media (max-width: 700px) {
-  .rail { width: 52px; min-width: 52px; }
-  .rail-btn { width: 38px; height: 38px; }
-  .content { padding: 20px 16px; }
-  .topbar { padding: 0 16px; }
-  .ocr-panel { grid-template-columns: 1fr; }
-  .pipeline-flow { flex-wrap: wrap; justify-content: center; gap: 8px; }
-  .pipe-arrow { width: 24px; }
-}
-</style>
-
-<!-- Rail -->
-<nav class="rail">
-  <div class="rail-logo">
-    <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="3" y="3" width="18" height="18" rx="3"/>
-      <path d="M7 8h10M7 12h6M7 16h8"/>
-    </svg>
-  </div>
-  <button class="rail-btn active" data-view="overview" title="Overview">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-  </button>
-  <button class="rail-btn" data-view="documents" title="Documents">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>
-  </button>
-  <button class="rail-btn" data-view="ocr" title="OCR Preview">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-  </button>
-  <button class="rail-btn" data-view="logs" title="Processing Logs">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
-  </button>
-  <button class="rail-btn" data-view="arch" title="Architecture">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12,2 2,7 12,12 22,7"/><polyline points="2,17 12,22 22,17"/><polyline points="2,12 12,17 22,12"/></svg>
-  </button>
-  <button class="rail-btn" data-view="setup" title="Setup Guide">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-  </button>
-  <div class="rail-spacer"></div>
-</nav>
-
-<!-- Main -->
-<div class="main">
-  <header class="topbar">
-    <h1>InvoiceOCR</h1>
-    <div class="topbar-sep"></div>
-    <span class="topbar-section" id="topbar-label">Overview</span>
-    <div class="topbar-right">
-      <span class="badge badge-success">Pipeline Active</span>
-      <span class="badge badge-accent">v1.0</span>
-    </div>
-  </header>
-
-  <!-- Overview -->
-  <div class="content" id="view-overview">
-    <div class="stats-row">
-      <div class="stat-card">
-        <div class="stat-label">Invoices Processed</div>
-        <div class="stat-value">1</div>
-        <div class="stat-sub">1 successful · 0 failed</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Total Extracted</div>
-        <div class="stat-value">$100</div>
-        <div class="stat-sub">USD · 1 line item</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Processing Time</div>
-        <div class="stat-value">0.85s</div>
-        <div class="stat-sub">Avg per invoice</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Test Coverage</div>
-        <div class="stat-value">270</div>
-        <div class="stat-sub">Unit + integration tests</div>
-      </div>
-    </div>
-
-    <div class="pipeline-section">
-      <div class="section-title">Processing Pipeline</div>
-      <div class="pipeline-flow">
-        <div class="pipe-stage active">
-          <div class="pipe-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          </div>
-          <span class="pipe-label">Intake</span>
-        </div>
-        <div class="pipe-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,6 15,12 9,18"/></svg></div>
-        <div class="pipe-stage active">
-          <div class="pipe-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          </div>
-          <span class="pipe-label">OCR</span>
-        </div>
-        <div class="pipe-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,6 15,12 9,18"/></svg></div>
-        <div class="pipe-stage active">
-          <div class="pipe-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16,18 22,12 16,6"/><polyline points="8,6 2,12 8,18"/></svg>
-          </div>
-          <span class="pipe-label">Parse</span>
-        </div>
-        <div class="pipe-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,6 15,12 9,18"/></svg></div>
-        <div class="pipe-stage active">
-          <div class="pipe-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-          </div>
-          <span class="pipe-label">Store</span>
-        </div>
-        <div class="pipe-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,6 15,12 9,18"/></svg></div>
-        <div class="pipe-stage active">
-          <div class="pipe-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22,4 12,14.01 9,11.01"/></svg>
-          </div>
-          <span class="pipe-label">Finalize</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="pipeline-section">
-      <div class="section-title">Last Processed Invoice</div>
-      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px 32px; font-size: 13px;">
-        <div class="parsed-field"><span class="parsed-key">Invoice #</span><span class="parsed-val">INV-001</span></div>
-        <div class="parsed-field"><span class="parsed-key">Vendor</span><span class="parsed-val">Acme Corp</span></div>
-        <div class="parsed-field"><span class="parsed-key">Date</span><span class="parsed-val">2024-01-15</span></div>
-        <div class="parsed-field"><span class="parsed-key">Total</span><span class="parsed-val" style="color:var(--success);font-weight:700;">$100.00 USD</span></div>
-        <div class="parsed-field"><span class="parsed-key">Status</span><span class="parsed-val"><span class="badge badge-success">Processed</span></span></div>
-        <div class="parsed-field"><span class="parsed-key">Doc ID</span><span class="parsed-val">1</span></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Documents -->
-  <div class="content" id="view-documents" hidden>
-    <div class="section-title" style="margin-bottom:16px;">Invoice Documents</div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>File</th>
-            <th>Invoice #</th>
-            <th>Vendor</th>
-            <th>Date</th>
-            <th>Amount</th>
-            <th>Hash</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>1</td>
-            <td>test_invoice.png</td>
-            <td>INV-001</td>
-            <td>Acme Corp</td>
-            <td>2024-01-15</td>
-            <td class="amount-cell">$100.00</td>
-            <td class="hash-cell" title="c2b775f3da834a639be8a99c007e3dc27ab00a5347e6ba97cde93354852f5f90">c2b775f3…52f5f90</td>
-            <td><span class="badge badge-success">Processed</span></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="section-title" style="margin:28px 0 16px;">Line Items</div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Item ID</th>
-            <th>Doc ID</th>
-            <th>Description</th>
-            <th>Qty</th>
-            <th>Unit Price</th>
-            <th>Line Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>1</td>
-            <td>1</td>
-            <td>Widget</td>
-            <td style="font-variant-numeric:tabular-nums">1</td>
-            <td style="font-variant-numeric:tabular-nums">$100.00</td>
-            <td class="amount-cell">$100.00</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- OCR -->
-  <div class="content" id="view-ocr" hidden>
-    <div class="section-title" style="margin-bottom:16px;">OCR Output — test_invoice.png</div>
-    <div class="ocr-panel">
-      <div class="ocr-block">
-        <div class="ocr-block-header">Raw OCR Text</div>
-        <div class="ocr-block-body">
-          <div class="ocr-raw">Acme Corp
-
-Invoice #INV-001
-
-Date: 2024-01-15
-
-Widget 1 100.00 100.00
-Total: $100.00</div>
-        </div>
-      </div>
-      <div class="ocr-block">
-        <div class="ocr-block-header">Parsed Fields</div>
-        <div class="ocr-block-body">
-          <div class="parsed-field"><span class="parsed-key">Invoice Number</span><span class="parsed-val">INV-001</span></div>
-          <div class="parsed-field"><span class="parsed-key">Date</span><span class="parsed-val">2024-01-15</span></div>
-          <div class="parsed-field"><span class="parsed-key">Vendor</span><span class="parsed-val">Acme Corp</span></div>
-          <div class="parsed-field"><span class="parsed-key">Total</span><span class="parsed-val" style="color:var(--success)">$100.00</span></div>
-          <div class="parsed-field"><span class="parsed-key">Currency</span><span class="parsed-val">USD</span></div>
-          <div class="parsed-field"><span class="parsed-key">Confidence</span><span class="parsed-val"><span class="badge badge-success">High</span></span></div>
-          <div class="parsed-field" style="flex-direction:column;gap:8px;">
-            <span class="parsed-key">Line Items</span>
-            <div style="font-size:13px;color:var(--text);">
-              Widget — 1 × $100.00 = $100.00
+    <!-- Main Content -->
+    <main class="flex-1 p-8">
+        <div id="pipeline-dashboard" class="view">
+            <h2 class="text-2xl font-bold mb-4">Pipeline Dashboard</h2>
+            <div id="kpi-container" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <!-- KPI Cards go here -->
             </div>
-          </div>
+            <div class="bg-white p-4 rounded shadow mb-6">
+                <canvas id="invoiceChart"></canvas>
+            </div>
+            <div id="invoice-list" class="bg-white p-4 rounded shadow">
+                <!-- Invoice List Table -->
+            </div>
         </div>
-      </div>
-    </div>
-  </div>
 
-  <!-- Logs -->
-  <div class="content" id="view-logs" hidden>
-    <div class="section-title" style="margin-bottom:20px;">Processing Log</div>
-    <div class="log-timeline">
-      <div class="log-entry">
-        <div class="log-header">
-          <span class="log-file">test_invoice.png</span>
-          <span class="badge badge-success">Success</span>
+        <div id="processing-logs" class="view hidden">
+            <h2 class="text-2xl font-bold mb-4">Processing Logs</h2>
+            <p>Placeholder: Logs content</p>
         </div>
-        <div class="log-meta">
-          <div class="log-meta-item">
-            <span class="log-meta-label">Log ID:</span>
-            <span class="log-meta-value">1</span>
-          </div>
-          <div class="log-meta-item">
-            <span class="log-meta-label">Started:</span>
-            <span class="log-meta-value">2026-09-25 12:35:43 UTC</span>
-          </div>
-          <div class="log-meta-item">
-            <span class="log-meta-label">Ended:</span>
-            <span class="log-meta-value">2026-09-25 12:35:44 UTC</span>
-          </div>
-          <div class="log-meta-item">
-            <span class="log-meta-label">Duration:</span>
-            <span class="log-meta-value">0.85s</span>
-          </div>
-          <div class="log-meta-item">
-            <span class="log-meta-label">Error:</span>
-            <span class="log-meta-value">None</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
 
-  <!-- Architecture -->
-  <div class="content" id="view-arch" hidden>
-    <div class="section-title" style="margin-bottom:20px;">System Architecture</div>
-    <div class="arch-grid">
-      <div class="arch-card">
-        <div class="arch-card-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <div id="sql-tables" class="view hidden">
+            <h2 class="text-2xl font-bold mb-4">SQL Tables</h2>
+            <p>Placeholder: SQL Tables content</p>
         </div>
-        <h3>intake.py</h3>
-        <p>Scans <code>input_invoices/</code> for new files. Validates format (PNG, JPG, TIFF, PDF) and integrity via Pillow. SHA-256 deduplication. Filename sanitization against path traversal.</p>
-      </div>
-      <div class="arch-card">
-        <div class="arch-card-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        </div>
-        <h3>ocr.py</h3>
-        <p>OpenCV preprocessing: grayscale → Gaussian denoise → CLAHE contrast → deskew → adaptive threshold. Tesseract 5.4.0 extraction. PDF→image via Poppler/pdf2image. Saves raw text to <code>ocr_output/</code>.</p>
-      </div>
-      <div class="arch-card">
-        <div class="arch-card-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16,18 22,12 16,6"/><polyline points="8,6 2,12 8,18"/></svg>
-        </div>
-        <h3>parser.py</h3>
-        <p>Regex/heuristic extraction of invoice number, date (multi-format), vendor name, total + currency, line items. Confidence scoring: high / medium / low based on field coverage.</p>
-      </div>
-      <div class="arch-card">
-        <div class="arch-card-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-        </div>
-        <h3>storage.py</h3>
-        <p>Server-side validation of all parsed fields before insert. SQLite storage into <code>invoice_documents</code> + <code>invoice_line_items</code>. Moves processed files. Query helpers for reporting.</p>
-      </div>
-      <div class="arch-card">
-        <div class="arch-card-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        </div>
-        <h3>config.py</h3>
-        <p>Loads <code>.env</code> via python-dotenv. Paths: INPUT_DIR, PROCESSED_DIR, FAILED_DIR, OCR_OUTPUT_DIR, DATABASE_PATH. Tesseract + Poppler paths. SMTP settings for notifications.</p>
-      </div>
-      <div class="arch-card">
-        <div class="arch-card-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-        </div>
-        <h3>db.py</h3>
-        <p>SQLite schema with versioned migrations (v1). Tables: <code>schema_version</code>, <code>invoice_documents</code>, <code>invoice_line_items</code>, <code>processing_logs</code>. Foreign keys and indexes enabled.</p>
-      </div>
-    </div>
 
-    <div class="pipeline-section" style="margin-top:24px;">
-      <div class="section-title">Directory Structure</div>
-      <div class="code-block">invoice-ocr-pipeline/
-├── run_pipeline.py         # Main entry point
-├── create_test_file.py     # Synthetic test data generator
-├── init_db.py              # Database initializer
-├── requirements.txt        # Python dependencies
-├── .env                    # Configuration (Tesseract, SMTP, DB)
-├── data/invoices.db        # SQLite database
-├── input_invoices/         # Drop zone for new invoices
-├── processed_invoices/     # Successfully processed files
-├── failed_invoices/        # Failed / rejected files
-├── ocr_output/             # Raw OCR text files
-├── logs/                   # Application logs
-└── src/
-    ├── config.py           # Environment & path config
-    ├── db.py               # Schema & migrations
-    ├── intake.py           # Validation & deduplication
-    ├── ocr.py              # Image preprocessing & Tesseract
-    ├── parser.py           # Field extraction & scoring
-    ├── storage.py          # DB insert & file routing
-    └── reporter.py         # Summary reports</div>
-    </div>
-  </div>
+        <div id="dead-letter-queue" class="view hidden">
+            <h2 class="text-2xl font-bold mb-4">Dead Letter Queue</h2>
+            <p>Placeholder: DLQ content</p>
+        </div>
 
-  <!-- Setup -->
-  <div class="content" id="view-setup" hidden>
-    <div class="section-title" style="margin-bottom:20px;">Setup Guide</div>
-    <div class="setup-steps">
-      <div class="setup-step">
-        <span class="step-num">1</span>
-        <span class="step-title">Install Tesseract OCR</span>
-        <div class="step-body">
-          Download from <strong>github.com/UB-Mannheim/tesseract/wiki</strong> and install.<br>
-          Default path: <code>C:\Program Files\Tesseract-OCR\tesseract.exe</code>
+        <div id="settings" class="view hidden">
+            <h2 class="text-2xl font-bold mb-4">Settings</h2>
+            <p>Placeholder: Settings content</p>
         </div>
-      </div>
-      <div class="setup-step">
-        <span class="step-num">2</span>
-        <span class="step-title">Install Poppler (PDF support)</span>
-        <div class="step-body">
-          Only needed for PDF invoices. Download from <strong>github.com/oschwartz10612/poppler-windows/releases</strong>.<br>
-          Extract and add the <code>bin</code> folder to PATH, or set <code>POPPLER_PATH</code> in <code>.env</code>.
-        </div>
-      </div>
-      <div class="setup-step">
-        <span class="step-num">3</span>
-        <span class="step-title">Python Environment</span>
-        <div class="step-body">
-          <div class="code-block">python -m venv venv
-.\venv\Scripts\activate
-pip install -r requirements.txt</div>
-        </div>
-      </div>
-      <div class="setup-step">
-        <span class="step-num">4</span>
-        <span class="step-title">Configure .env</span>
-        <div class="step-body">
-          <div class="code-block">TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
-POPPLER_PATH=
-DATABASE_PATH=data/invoices.db</div>
-        </div>
-      </div>
-      <div class="setup-step">
-        <span class="step-num">5</span>
-        <span class="step-title">Initialize Database</span>
-        <div class="step-body">
-          <div class="code-block">python init_db.py</div>
-          Creates the SQLite database with schema v1 (invoice_documents, invoice_line_items, processing_logs).
-        </div>
-      </div>
-      <div class="setup-step">
-        <span class="step-num">6</span>
-        <span class="step-title">Run the Pipeline</span>
-        <div class="step-body">
-          <div class="code-block"># Generate a test invoice
-python create_test_file.py
+    </main>
 
-# Process all invoices in input_invoices/
-python run_pipeline.py</div>
-          Drop real invoices (.png, .jpg, .pdf, .tiff) into <code>input_invoices/</code> and run the pipeline.
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
+    <script>
+        let dashboardData = null;
 
-<script>
-(function() {
-  const views = ['overview','documents','ocr','logs','arch','setup'];
-  const labels = {
-    overview: 'Overview',
-    documents: 'Documents',
-    ocr: 'OCR Preview',
-    logs: 'Processing Logs',
-    arch: 'Architecture',
-    setup: 'Setup Guide'
-  };
+        async function fetchDashboardData() {
+            const response = await fetch('dashboard_data.json');
+            dashboardData = await response.json();
+            renderDashboard();
+        }
 
-  function switchView(id) {
-    views.forEach(v => {
-      const el = document.getElementById('view-' + v);
-      if (el) el.hidden = v !== id;
-    });
-    document.querySelectorAll('.rail-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.view === id);
-    });
-    const lbl = document.getElementById('topbar-label');
-    if (lbl) lbl.textContent = labels[id] || id;
-  }
+        function showView(viewId) {
+            document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+            document.getElementById(viewId).classList.remove('hidden');
+        }
 
-  document.querySelectorAll('.rail-btn').forEach(btn => {
-    btn.addEventListener('click', () => switchView(btn.dataset.view));
-  });
-})();
-</script>
+        function renderDashboard() {
+            // Render KPI Cards
+            const kpiContainer = document.getElementById('kpi-container');
+            const totalInvoices = dashboardData.documents.length;
+            kpiContainer.innerHTML = `
+                <div class="bg-white p-4 rounded shadow">
+                    <h3 class="text-sm font-semibold text-gray-500">Total Invoices</h3>
+                    <p class="text-2xl font-bold">${totalInvoices}</p>
+                </div>
+            `;
+
+            // Render Invoice Table
+            const invoiceList = document.getElementById('invoice-list');
+            let tableHtml = `
+                <table class="w-full text-left">
+                    <thead><tr><th class="border-b p-2">Invoice #</th><th class="border-b p-2">Vendor</th><th class="border-b p-2">Total</th></tr></thead>
+                    <tbody>
+            `;
+            dashboardData.documents.forEach(doc => {
+                tableHtml += `<tr><td class="border-b p-2">${doc.invoice_number}</td><td class="border-b p-2">${doc.vendor_name}</td><td class="border-b p-2">${doc.total_amount}</td></tr>`;
+            });
+            tableHtml += `</tbody></table>`;
+            invoiceList.innerHTML = tableHtml;
+
+            // Render Chart
+            const ctx = document.getElementById('invoiceChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: dashboardData.documents.map(d => d.invoice_number),
+                    datasets: [{ label: 'Total Amount', data: dashboardData.documents.map(d => d.total_amount) }]
+                }
+            });
+        }
+
+        fetchDashboardData();
+    </script>
+</body>
+</html>
