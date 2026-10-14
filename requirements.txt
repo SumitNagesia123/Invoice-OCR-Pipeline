@@ -7,13 +7,17 @@ Pillow>=10.0.0           # Image preprocessing
 # PDF handling
 pdf2image>=1.16.3        # Convert PDF pages to images
 
-# Database
-# sqlite3 is built into Python — no extra package needed
+# Database (MySQL)
+mysql-connector-python>=8.4.0
+
+# LLM extraction
+anthropic>=0.30.0
 
 # Environment / config
 python-dotenv>=1.0.0
 
 # Email (stdlib smtplib is used; no extra package needed)
 
-# Image preprocessing
-opencv-python-headless>=4.8.0   # Deskew, denoise, contrast adjustments
+# Reporting
+pandas>=2.0.0
+openpyxl>=3.0.0

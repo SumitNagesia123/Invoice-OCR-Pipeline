@@ -7,8 +7,11 @@ Handles both image files and PDFs (via pdf2image + Poppler).
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
+
+IST = ZoneInfo("Asia/Kolkata")
 
 import cv2
 import numpy as np
@@ -157,7 +160,7 @@ def _save_ocr_text(file_name: str, text: str) -> Path:
     ocr_dir = config.OCR_OUTPUT_DIR
     ocr_dir.mkdir(parents=True, exist_ok=True)
     stem = Path(file_name).stem
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(IST).strftime("%Y%m%d_%H%M%S")
     out_path = ocr_dir / f"{stem}_{timestamp}.txt"
     out_path.write_text(text, encoding="utf-8")
     return out_path

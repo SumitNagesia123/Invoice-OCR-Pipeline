@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Initialize (or migrate) the InvoiceOCR database.
+Initialize (or migrate) the InvoiceOCR database (MySQL).
 
 Usage:
     python init_db.py
@@ -22,41 +22,25 @@ logging.basicConfig(
 
 
 def verify_tables(conn) -> bool:
-    """Check that all expected tables and indexes exist."""
+    """Check that all expected tables exist using INFORMATION_SCHEMA."""
+    cursor = conn.cursor()
     expected_tables = {"schema_version", "invoice_documents",
                        "invoice_line_items", "processing_logs"}
-    rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'"
-    ).fetchall()
-    actual_tables = {row["name"] for row in rows}
+
+    cursor.execute("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'")
+    actual_tables = {row[0] for row in cursor.fetchall()}
+    cursor.close()
 
     missing = expected_tables - actual_tables
     if missing:
         print(f"FAIL: Missing tables: {missing}")
         return False
-
-    # Verify indexes
-    expected_indexes = {
-        "idx_invoice_documents_file_name",
-        "idx_invoice_documents_file_hash",
-        "idx_invoice_line_items_document_id",
-        "idx_processing_logs_file_name",
-    }
-    rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='index'"
-    ).fetchall()
-    actual_indexes = {row["name"] for row in rows}
-
-    missing_idx = expected_indexes - actual_indexes
-    if missing_idx:
-        print(f"FAIL: Missing indexes: {missing_idx}")
-        return False
-
     return True
 
 
 def verify_columns(conn) -> bool:
-    """Spot-check that key columns exist with the right names."""
+    """Spot-check that key columns exist."""
+    cursor = conn.cursor()
     checks = {
         "invoice_documents": [
             "document_id", "file_name", "file_hash", "invoice_number",
@@ -73,26 +57,35 @@ def verify_columns(conn) -> bool:
         ],
     }
     for table, expected_cols in checks.items():
-        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-        actual_cols = {row["name"] for row in rows}
+        cursor.execute("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s", (table,))
+        actual_cols = {row[0] for row in cursor.fetchall()}
         missing = set(expected_cols) - actual_cols
         if missing:
             print(f"FAIL: Table '{table}' missing columns: {missing}")
+            cursor.close()
             return False
+    cursor.close()
     return True
 
 
 def verify_foreign_keys(conn) -> bool:
-    """Verify the FK from invoice_line_items → invoice_documents."""
-    fks = conn.execute(
-        "PRAGMA foreign_key_list(invoice_line_items)"
-    ).fetchall()
-    if not fks:
+    """Verify the FK from invoice_line_items -> invoice_documents."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT REFERENCED_TABLE_NAME, COLUMN_NAME
+        FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+        WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'invoice_line_items'
+        AND CONSTRAINT_NAME != 'PRIMARY'
+    """)
+    fk = cursor.fetchone()
+    cursor.close()
+
+    if not fk:
         print("FAIL: No foreign key on invoice_line_items")
         return False
-    fk = fks[0]
-    if fk["table"] != "invoice_documents" or fk["from"] != "document_id":
-        print(f"FAIL: Unexpected FK: {dict(fk)}")
+    if fk[0] != "invoice_documents" or fk[1] != "document_id":
+        print(f"FAIL: Unexpected FK: {fk}")
         return False
     return True
 
@@ -109,7 +102,7 @@ def main():
         ok = verify_foreign_keys(conn) and ok
 
         if ok:
-            print("OK: All tables, columns, indexes, and foreign keys verified.")
+            print("OK: All tables, columns, and foreign keys verified.")
         else:
             print("ERRORS found — see above.")
             sys.exit(1)

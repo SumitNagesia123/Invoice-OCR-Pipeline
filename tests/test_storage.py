@@ -319,7 +319,7 @@ class TestStoreInvoice(_TempDBTestCase):
         self.assertIsNotNone(row)
         self.assertEqual(row["file_name"], "inv.png")
         self.assertEqual(row["invoice_number"], "INV-001")
-        self.assertEqual(row["status"], "processed")
+        self.assertEqual(row["status"], "success")
 
     def test_medium_confidence_needs_review(self):
         parsed = self._make_parsed(confidence="medium")

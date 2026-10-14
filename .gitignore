@@ -28,7 +28,13 @@ data/*.db
 Thumbs.db
 .DS_Store
 desktop.ini
-.env
-data/*.db
-venv/
-__pycache__/
+
+# User requested additions
+*.sql
+*.log
+output/
+temp_pdf_staging/
+memory/
+MEMORY.md
+dashboard_data.json
+input_invoices_backup/

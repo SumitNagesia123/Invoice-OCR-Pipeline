@@ -10,13 +10,16 @@ import hashlib
 import logging
 import re
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
+
+IST = ZoneInfo("Asia/Kolkata")
 
 from PIL import Image
 
-from src import config
-from src.db import get_connection
+from src import config, storage
+from src.db import get_connection, row_to_dict
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,8 @@ def sanitize_filename(name: str) -> str:
     """
     Remove or replace characters that could cause path-traversal
     or filesystem issues.  Preserves the extension.
+    This does NOT rename the original file; it returns a safe version
+    for use in output paths, appending a counter if a collision occurs.
     """
     # Strip directory separators and null bytes
     name = name.replace("/", "_").replace("\\", "_").replace("\0", "")
@@ -99,29 +104,47 @@ def is_file_valid(file_path: Path) -> tuple[bool, str]:
 
 # ── Duplicate detection ───────────────────────────────────────
 
-def is_duplicate(file_hash: str) -> bool:
-    """Return True if a document with this hash is already in the DB."""
+def get_original_file_name_by_hash(file_hash: str) -> str | None:
+    """Return the filename for a given file_hash from successful/reviewed documents."""
     conn = get_connection()
+    cursor = conn.cursor()
     try:
-        row = conn.execute(
-            "SELECT 1 FROM invoice_documents WHERE file_hash = ?",
+        cursor.execute("SELECT file_name FROM invoice_documents WHERE file_hash = %s AND status != 'failed' LIMIT 1", (file_hash,))
+        row = cursor.fetchone()
+        return row[0] if row else None
+    finally:
+        cursor.close()
+        conn.close()
+
+def is_duplicate(file_hash: str) -> bool:
+    """Return True if a non-failed document with this hash is already in the DB."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT 1 FROM invoice_documents WHERE file_hash = %s AND status != 'failed'",
             (file_hash,),
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         return row is not None
     finally:
+        cursor.close()
         conn.close()
 
 
 def is_filename_known(file_name: str) -> bool:
     """Return True if this filename has already been processed."""
     conn = get_connection()
+    cursor = conn.cursor()
     try:
-        row = conn.execute(
-            "SELECT 1 FROM invoice_documents WHERE file_name = ?",
+        cursor.execute(
+            "SELECT 1 FROM invoice_documents WHERE file_name = %s",
             (file_name,),
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         return row is not None
     finally:
+        cursor.close()
         conn.close()
 
 
@@ -148,15 +171,18 @@ def move_to_failed(file_path: Path, reason: str) -> Path:
 def _log_processing_start(file_name: str) -> int:
     """Insert a processing_logs row and return its log_id."""
     conn = get_connection()
+    cursor = conn.cursor()
     try:
-        cur = conn.execute(
+        cursor.execute(
             "INSERT INTO processing_logs (file_name, start_time, status) "
-            "VALUES (?, ?, 'running')",
-            (file_name, datetime.now(timezone.utc).isoformat()),
+            "VALUES (%s, %s, 'running')",
+            (file_name, datetime.now(IST).isoformat()),
         )
+        log_id = cursor.lastrowid
         conn.commit()
-        return cur.lastrowid
+        return log_id
     finally:
+        cursor.close()
         conn.close()
 
 
@@ -164,16 +190,18 @@ def _log_processing_end(log_id: int, status: str,
                         error_message: str | None = None) -> None:
     """Update a processing_logs row with the outcome."""
     conn = get_connection()
+    cursor = conn.cursor()
     try:
-        conn.execute(
+        cursor.execute(
             "UPDATE processing_logs "
-            "SET end_time = ?, status = ?, error_message = ? "
-            "WHERE log_id = ?",
-            (datetime.now(timezone.utc).isoformat(), status, error_message,
+            "SET end_time = %s, status = %s, error_message = %s "
+            "WHERE log_id = %s",
+            (datetime.now(IST).isoformat(), status, error_message,
              log_id),
         )
         conn.commit()
     finally:
+        cursor.close()
         conn.close()
 
 
@@ -201,7 +229,7 @@ def scan_input_folder() -> list[dict]:
     results: list[dict] = []
 
     files = sorted(
-        f for f in input_dir.iterdir()
+        f for f in input_dir.rglob("*")
         if f.is_file() and f.name != ".gitkeep"
     )
 
@@ -211,19 +239,30 @@ def scan_input_folder() -> list[dict]:
 
     logger.info("Found %d file(s) in %s", len(files), input_dir)
 
+    seen_hashes: set[str] = set()
+    seen_filenames: set[str] = set()
+
     for file_path in files:
-        safe_name = sanitize_filename(file_path.name)
-        log_id = _log_processing_start(safe_name)
+        # Store the ORIGINAL filename, not the sanitized one
+        original_name = file_path.name
+        log_id = _log_processing_start(original_name)
 
         # ── Validate ──────────────────────────────────────────
         ok, reason = is_file_valid(file_path)
         if not ok:
+            # Corrupt files: compute hash if possible, otherwise NULL
+            try:
+                file_hash = compute_file_hash(file_path)
+            except Exception:
+                file_hash = None
+
+            storage.store_failed_invoice(original_name, file_hash, reason)
             move_to_failed(file_path, reason)
             _log_processing_end(log_id, "failed", reason)
             results.append({
                 "file_path": file_path,
-                "file_name": safe_name,
-                "file_hash": None,
+                "file_name": original_name,
+                "file_hash": file_hash,
                 "log_id": log_id,
                 "status": "failed",
                 "reason": reason,
@@ -233,27 +272,45 @@ def scan_input_folder() -> list[dict]:
         # ── Hash & dedup ──────────────────────────────────────
         file_hash = compute_file_hash(file_path)
 
-        if is_duplicate(file_hash):
-            reason = "Duplicate file (hash already in database)"
-            move_to_failed(file_path, reason)
-            _log_processing_end(log_id, "failed", reason)
+        # Check in-batch duplicate first
+        if file_hash in seen_hashes:
+            reason = "Duplicate file (hash already seen in current batch)"
+            # Find the first filename with this hash in this batch
+            original_file = next((fn for fn, fh in seen_filenames if fh == file_hash), "unknown")
+            storage.store_duplicate(original_name, file_hash, original_file)
+            _log_processing_end(log_id, "duplicate_skipped", reason)
             results.append({
                 "file_path": file_path,
-                "file_name": safe_name,
+                "file_name": original_name,
                 "file_hash": file_hash,
                 "log_id": log_id,
-                "status": "skipped_duplicate",
+                "status": "duplicate_skipped",
                 "reason": reason,
             })
             continue
 
-        if is_filename_known(safe_name):
+        if is_duplicate(file_hash):
+            reason = "Duplicate file (hash already in database)"
+            original_file = get_original_file_name_by_hash(file_hash)
+            storage.store_duplicate(original_name, file_hash, original_file or "unknown")
+            _log_processing_end(log_id, "duplicate_skipped", reason)
+            results.append({
+                "file_path": file_path,
+                "file_name": original_name,
+                "file_hash": file_hash,
+                "log_id": log_id,
+                "status": "duplicate_skipped",
+                "reason": reason,
+            })
+            continue
+
+        if is_filename_known(original_name):
             reason = "Filename already exists in database"
             move_to_failed(file_path, reason)
             _log_processing_end(log_id, "failed", reason)
             results.append({
                 "file_path": file_path,
-                "file_name": safe_name,
+                "file_name": original_name,
                 "file_hash": file_hash,
                 "log_id": log_id,
                 "status": "skipped_duplicate",
@@ -261,11 +318,14 @@ def scan_input_folder() -> list[dict]:
             })
             continue
 
+        seen_hashes.add(file_hash)
+        seen_filenames.add((original_name, file_hash))
+
         # ── Ready for OCR ─────────────────────────────────────
-        logger.info("Ready for OCR: %s (hash: %s…)", safe_name, file_hash[:12])
+        logger.info("Ready for OCR: %s (hash: %s…)", original_name, file_hash[:12])
         results.append({
             "file_path": file_path,
-            "file_name": safe_name,
+            "file_name": original_name,
             "file_hash": file_hash,
             "log_id": log_id,
             "status": "ready",

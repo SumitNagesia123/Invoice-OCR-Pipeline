@@ -187,7 +187,7 @@ class TestBuildReportBody(unittest.TestCase):
             "invoices": invoices or [],
             "logs": logs or [],
             "total": len(invoices or []),
-            "processed": 0,
+            "success": 0,
             "needs_review": 0,
             "failed_logs": 0,
             "since": now - timedelta(hours=24),
@@ -203,7 +203,7 @@ class TestBuildReportBody(unittest.TestCase):
         self.assertIn("Daily Summary", body)
 
     def test_statistics_section(self):
-        data = self._make_data(total=5, processed=3,
+        data = self._make_data(total=5, success=3,
                                needs_review=2, failed_logs=1)
         body = build_report_body(data)
         self.assertIn("Total invoices:   5", body)
@@ -215,7 +215,7 @@ class TestBuildReportBody(unittest.TestCase):
         invoices = [
             {"file_name": "inv1.png", "vendor_name": "Acme",
              "total_amount": 500.0, "currency": "USD",
-             "status": "processed"},
+             "status": "success"},
         ]
         data = self._make_data(invoices=invoices, total=1, processed=1)
         body = build_report_body(data)

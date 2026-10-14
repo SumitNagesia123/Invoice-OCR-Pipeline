@@ -20,17 +20,23 @@ OCR_OUTPUT_DIR = PROJECT_ROOT / "ocr_output"
 LOG_DIR = PROJECT_ROOT / "logs"
 DATA_DIR = PROJECT_ROOT / "data"
 
-# ── Database ──────────────────────────────────────────────────
-DATABASE_PATH = PROJECT_ROOT / os.getenv("DATABASE_PATH", "data/invoices.db")
+# ── Database (MySQL) ─────────────────────────────────────────
+DB_HOST     = os.getenv("DB_HOST", "localhost")
+DB_PORT     = os.getenv("DB_PORT", "3306")
+DB_NAME     = os.getenv("DB_NAME", "invoice_ocr")
+DB_USER     = os.getenv("DB_USER", "")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 
 # ── Tesseract ─────────────────────────────────────────────────
-TESSERACT_CMD = os.getenv(
-    "TESSERACT_CMD",
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-)
+TESSERACT_CMD = os.getenv("TESSERACT_CMD")
+if not TESSERACT_CMD:
+    raise EnvironmentError("Missing required environment variable: TESSERACT_CMD in .env")
 
 # ── Poppler (for pdf2image on Windows) ────────────────────────
-POPPLER_PATH = os.getenv("POPPLER_PATH", "") or None
+POPPLER_PATH = os.getenv("POPPLER_PATH")
+if not POPPLER_PATH:
+    raise EnvironmentError("Missing required environment variable: POPPLER_PATH in .env")
+POPPLER_PATH = Path(POPPLER_PATH)
 
 # ── SMTP (email summary) ─────────────────────────────────────
 SMTP_HOST = os.getenv("SMTP_HOST", "")
@@ -42,3 +48,13 @@ SMTP_TO = os.getenv("SMTP_TO", "")
 
 # ── Supported file extensions ─────────────────────────────────
 SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif"}
+
+# ── Mock Mode ────────────────────────────────────────────────
+MOCK_EXTRACTOR = os.getenv("MOCK_EXTRACTOR", "false").lower() == "true"
+
+if __name__ == '__main__':
+    print("Configuration loaded successfully:")
+    print(f"  DB_HOST: {DB_HOST}")
+    print(f"  DB_NAME: {DB_NAME}")
+    print(f"  TESSERACT_CMD: {TESSERACT_CMD}")
+    print(f"  MOCK_EXTRACTOR: {MOCK_EXTRACTOR}")

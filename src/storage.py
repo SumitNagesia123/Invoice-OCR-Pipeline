@@ -2,7 +2,7 @@
 InvoiceOCR Pipeline — Storage.
 
 Takes structured data from the parser (and metadata from intake/OCR) and
-writes it to the SQLite database.  Responsible for:
+writes it to the MySQL database.  Responsible for:
 
   - Field validation / sanitization before insert
   - Inserting into invoice_documents + invoice_line_items
@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from src import config
-from src.db import get_connection
+from src.db import get_connection, row_to_dict
 
 logger = logging.getLogger(__name__)
 
@@ -172,42 +172,58 @@ def store_invoice(
     file_hash: str,
     ocr_text_path: str | Path | None,
     parsed: dict[str, Any],
+    review_reason: str | None = None,
+    failure_reason: str | None = None,
+    original_file: str | None = None,
 ) -> int:
     """
     Insert a fully-parsed invoice into the database.
-
-    Validates all fields before inserting.  Creates a row in
-    invoice_documents and one row per line item in invoice_line_items.
-
-    Args:
-        file_name:     Sanitized filename from intake.
-        file_hash:     SHA-256 hex digest from intake.
-        ocr_text_path: Path to the saved OCR text file (may be None).
-        parsed:        Dict from parse_invoice_text().
-
-    Returns:
-        The document_id of the inserted invoice_documents row.
     """
     validated = validate_parsed_data(parsed)
 
-    # Determine status based on confidence
-    confidence = validated["confidence"]
-    if confidence == "high":
-        status = "processed"
+    if failure_reason:
+        status = "failed"
     else:
-        status = "needs_review"
+        # Determine status based on confidence
+        confidence = validated["confidence"]
+        if confidence == "high":
+            status = "success"
+        else:
+            status = "needs_review"
 
-    ocr_path_str = str(ocr_text_path) if ocr_text_path else None
+    # Make ocr_text_path relative
+    if ocr_text_path:
+        ocr_path = Path(ocr_text_path)
+        try:
+            ocr_path = ocr_path.relative_to(config.PROJECT_ROOT)
+        except ValueError:
+            pass # Keep as is if not relative
+        ocr_path_str = str(ocr_path)
+    else:
+        ocr_path_str = None
 
     conn = get_connection()
+    cursor = conn.cursor()
     try:
-        cur = conn.execute(
+        # UPSERT logic: Insert invoice or update if failed/needs_review
+        cursor.execute(
             """
             INSERT INTO invoice_documents
                 (file_name, file_hash, invoice_number, invoice_date,
                  vendor_name, total_amount, currency, status,
-                 ocr_text_path, processed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ocr_text_path, review_reason, failure_reason, original_file)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                invoice_number = VALUES(invoice_number),
+                invoice_date = VALUES(invoice_date),
+                vendor_name = VALUES(vendor_name),
+                total_amount = VALUES(total_amount),
+                currency = VALUES(currency),
+                status = VALUES(status),
+                ocr_text_path = VALUES(ocr_text_path),
+                review_reason = VALUES(review_reason),
+                failure_reason = NULL,
+                original_file = VALUES(original_file)
             """,
             (
                 file_name,
@@ -219,18 +235,24 @@ def store_invoice(
                 validated["currency"],
                 status,
                 ocr_path_str,
-                datetime.now(timezone.utc).isoformat(),
+                review_reason,
+                failure_reason,
+                original_file,
             ),
         )
-        document_id = cur.lastrowid
+        document_id = cursor.lastrowid
+        # If it was an update, lastrowid might be 0, need to fetch the ID
+        if document_id == 0:
+            cursor.execute("SELECT document_id FROM invoice_documents WHERE file_name = %s", (file_name,))
+            document_id = cursor.fetchone()[0]
 
         # Insert line items
         for item in validated["line_items"]:
-            conn.execute(
+            cursor.execute(
                 """
                 INSERT INTO invoice_line_items
                     (document_id, description, quantity, unit_price, line_total)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s)
                 """,
                 (
                     document_id,
@@ -252,6 +274,7 @@ def store_invoice(
         conn.rollback()
         raise
     finally:
+        cursor.close()
         conn.close()
 
 
@@ -269,15 +292,15 @@ def finalize_processing_log(
     """
     status = "success" if success else "failed"
     conn = get_connection()
+    cursor = conn.cursor()
     try:
-        conn.execute(
+        cursor.execute(
             """
             UPDATE processing_logs
-            SET end_time = ?, status = ?, error_message = ?
-            WHERE log_id = ?
+            SET end_time = CURRENT_TIMESTAMP, status = %s, error_message = %s
+            WHERE log_id = %s
             """,
             (
-                datetime.now(timezone.utc).isoformat(),
                 status,
                 error_message,
                 log_id,
@@ -285,6 +308,7 @@ def finalize_processing_log(
         )
         conn.commit()
     finally:
+        cursor.close()
         conn.close()
 
 
@@ -312,46 +336,90 @@ def move_to_processed(file_path: Path) -> Path:
     return dest
 
 
-# ── Query helpers ────────────────────────────────────────────
+def store_failed_invoice(file_name: str, file_hash: str | None, failure_reason: str) -> None:
+    """
+    Store or update a failed invoice record, allowing retries.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO invoice_documents
+                (file_name, file_hash, status, failure_reason)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                status = 'failed',
+                failure_reason = VALUES(failure_reason),
+                file_hash = VALUES(file_hash)
+        """, (file_name, file_hash, 'failed', failure_reason))
+        conn.commit()
+    finally:
+        cursor.close(); conn.close()
+
+def store_duplicate(file_name: str, file_hash: str, original_file: str) -> None:
+    """
+    Record that a duplicate invoice file was skipped in duplicate_files.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO duplicate_files
+                (file_name, file_hash, original_file)
+            VALUES (%s, %s, %s)
+        """, (file_name, file_hash, original_file))
+        conn.commit()
+    finally:
+        cursor.close(); conn.close()
 
 def get_invoice_by_id(document_id: int) -> dict[str, Any] | None:
     """Retrieve an invoice_documents row by its ID."""
     conn = get_connection()
+    cursor = conn.cursor()
     try:
-        row = conn.execute(
-            "SELECT * FROM invoice_documents WHERE document_id = ?",
+        cursor.execute(
+            "SELECT * FROM invoice_documents WHERE document_id = %s",
             (document_id,),
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         if row is None:
             return None
-        return dict(row)
+        return row_to_dict(cursor, row)
     finally:
+        cursor.close()
         conn.close()
+
 
 
 def get_line_items(document_id: int) -> list[dict[str, Any]]:
     """Retrieve all line items for a given document_id."""
     conn = get_connection()
+    cursor = conn.cursor()
     try:
-        rows = conn.execute(
-            "SELECT * FROM invoice_line_items WHERE document_id = ?",
+        cursor.execute(
+            "SELECT * FROM invoice_line_items WHERE document_id = %s",
             (document_id,),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        )
+        rows = cursor.fetchall()
+        return [row_to_dict(cursor, r) for r in rows]
     finally:
+        cursor.close()
         conn.close()
 
 
 def get_processing_log(log_id: int) -> dict[str, Any] | None:
     """Retrieve a processing_logs row by its ID."""
     conn = get_connection()
+    cursor = conn.cursor()
     try:
-        row = conn.execute(
-            "SELECT * FROM processing_logs WHERE log_id = ?",
+        cursor.execute(
+            "SELECT * FROM processing_logs WHERE log_id = %s",
             (log_id,),
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         if row is None:
             return None
-        return dict(row)
+        return row_to_dict(cursor, row)
     finally:
+        cursor.close()
         conn.close()

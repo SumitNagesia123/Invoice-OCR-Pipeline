@@ -115,7 +115,7 @@ class TestFullPipelineIntegration(_TempDBTestCase):
         # 7. Verification
         invoice = storage.get_invoice_by_id(doc_id)
         self.assertIsNotNone(invoice)
-        self.assertEqual(invoice["status"], "processed")
+        self.assertEqual(invoice["status"], "success")
 
         line_items = storage.get_line_items(doc_id)
         self.assertEqual(len(line_items), 1)
