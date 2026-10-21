@@ -12,7 +12,6 @@ Covers:
 import os
 import random
 import shutil
-import sqlite3
 import sys
 import tempfile
 import unittest
@@ -25,7 +24,8 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src import config  # noqa: E402
-from src.db import init_db, get_connection
+from src.db import get_connection, row_to_dict
+from tests.db_setup import init_db_for_test
 from src.intake import (
     compute_file_hash,
     is_file_valid,
@@ -53,21 +53,18 @@ class _TempEnvTestCase(unittest.TestCase):
                   self.failed_dir, self.ocr_dir, self.data_dir):
             d.mkdir()
 
-        self.db_path = self.data_dir / "test.db"
-
         # Patch config paths so src modules read them at call time
         self._patches = [
             patch.object(config, "INPUT_DIR", self.input_dir),
             patch.object(config, "PROCESSED_DIR", self.processed_dir),
             patch.object(config, "FAILED_DIR", self.failed_dir),
             patch.object(config, "OCR_OUTPUT_DIR", self.ocr_dir),
-            patch.object(config, "DATABASE_PATH", self.db_path),
         ]
         for p in self._patches:
             p.start()
 
-        # Initialize DB in temp location
-        init_db()
+        # Initialize DB in MySQL test database
+        init_db_for_test()
 
     def tearDown(self):
         for p in self._patches:
@@ -214,44 +211,7 @@ class TestScanInputFolder(_TempEnvTestCase):
         self.assertTrue(any("bad" in f.name for f in failed_files))
 
     def test_duplicate_hash_skipped(self):
-        # Create and scan a valid image
-        src_path = self._create_test_image("original.png")
-        original_hash = compute_file_hash(src_path)
-        results1 = scan_input_folder()
-        self.assertEqual(results1[0]["status"], "ready")
-
-        # Insert the first file into the DB so dupe detection works
-        conn = get_connection()
-        conn.execute(
-            "INSERT INTO invoice_documents "
-            "(file_name, file_hash, status) VALUES (?, ?, 'processed')",
-            ("original.png", original_hash),
-        )
-        conn.commit()
-        conn.close()
-
-        # Remove original from input (it would have been moved by the
-        # pipeline in real use), then place an identical copy
-        src_path.unlink(missing_ok=True)
-        self._create_identical_image("original_copy.png", src_path)
-
-        # Oops — src_path was already deleted.  Create from scratch with
-        # the same pixels:  write a deterministic image for this test.
-        copy_path = self.input_dir / "original_copy.png"
-        if not copy_path.exists():
-            # Re-create with same content by writing same hash-able bytes
-            img = Image.new("RGB", (200, 100), color=(42, 42, 42))
-            img.save(copy_path)
-
-        # We need the copy to have the SAME hash as original.  Easiest way:
-        # write the same DB hash and just test that the code catches it.
-        # Let's instead re-insert original.png's hash and put a new file
-        # whose hash matches.  Simplest: use a fixture.
-        # -- re-approach: create two identical files before scan --
-
-    def test_duplicate_hash_skipped(self):
         """A file with the same hash as one already in the DB is skipped."""
-        # Create a deterministic image
         img = Image.new("RGB", (10, 10), color=(99, 99, 99))
         first = self.input_dir / "first.png"
         img.save(first)
@@ -259,25 +219,25 @@ class TestScanInputFolder(_TempEnvTestCase):
 
         # Simulate that first.png was already processed
         conn = get_connection()
-        conn.execute(
+        cursor = conn.cursor()
+        cursor.execute(
             "INSERT INTO invoice_documents "
-            "(file_name, file_hash, status) VALUES (?, ?, 'processed')",
+            "(file_name, file_hash, status) VALUES (%s, %s, 'processed')",
             ("first.png", file_hash),
         )
         conn.commit()
+        cursor.close()
         conn.close()
 
         # Place an identical file (same content → same hash)
         second = self.input_dir / "second.png"
         img.save(second)
-        # Remove first.png so only second.png is scanned
         first.unlink()
 
         results = scan_input_folder()
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["status"], "skipped_duplicate")
+        self.assertEqual(results[0]["status"], "duplicate_skipped")
         self.assertIn("duplicate", results[0]["reason"].lower())
-        # The dupe should have been moved out of input
         self.assertFalse((self.input_dir / "second.png").exists())
 
     def test_unsupported_file_routed_to_failed(self):
@@ -294,9 +254,12 @@ class TestScanInputFolder(_TempEnvTestCase):
         log_id = results[0]["log_id"]
         self.assertIsNotNone(log_id)
         conn = get_connection()
-        row = conn.execute(
-            "SELECT * FROM processing_logs WHERE log_id = ?", (log_id,)
-        ).fetchone()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM processing_logs WHERE log_id = %s", (log_id,)
+        )
+        row = row_to_dict(cursor, cursor.fetchone())
+        cursor.close()
         conn.close()
         self.assertIsNotNone(row)
         self.assertEqual(row["file_name"], "logged.png")
@@ -312,6 +275,31 @@ class TestScanInputFolder(_TempEnvTestCase):
         self.assertEqual(statuses["bad.jpg"], "failed")
         self.assertEqual(statuses["doc.txt"], "failed")
 
+    def test_empty_file_stored_as_failed_with_null_hash(self):
+        """Empty file is stored as failed with a NULL hash and loop continues."""
+        empty_path = self._create_empty_file("empty.png")
+        valid_path = self._create_test_image("next_valid.png")
+        results = scan_input_folder()
+        self.assertEqual(len(results), 2)
+
+        statuses = {r["file_name"]: r for r in results}
+        self.assertEqual(statuses["empty.png"]["status"], "failed")
+        self.assertIsNone(statuses["empty.png"]["file_hash"])
+        self.assertEqual(statuses["next_valid.png"]["status"], "ready")
+
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT file_hash, status, failure_reason FROM invoice_documents WHERE file_name = %s",
+            ("empty.png",)
+        )
+        row = row_to_dict(cursor, cursor.fetchone())
+        cursor.close()
+        conn.close()
+        self.assertIsNotNone(row)
+        self.assertIsNone(row["file_hash"])
+        self.assertEqual(row["status"], "failed")
+
 
 class TestMoveToFailed(_TempEnvTestCase):
 
@@ -324,18 +312,15 @@ class TestMoveToFailed(_TempEnvTestCase):
 
     def test_name_collision_resolved(self):
         """Two files with the same name don't overwrite each other."""
-        # First file
         f1 = self.input_dir / "dup.png"
         f1.write_bytes(b"first")
         move_to_failed(f1, "reason 1")
 
-        # Second file with the same name
         f2 = self.input_dir / "dup.png"
         f2.write_bytes(b"second")
         dest2 = move_to_failed(f2, "reason 2")
 
         self.assertNotEqual(dest2.name, "dup.png")
-        # Both should exist in failed
         failed_files = list(self.failed_dir.iterdir())
         self.assertEqual(len(failed_files), 2)
 

@@ -20,17 +20,14 @@ logger = logging.getLogger(__name__)
 def process_file(result: dict) -> None:
     """Run OCR, extraction, and storage for a single file."""
     try:
-        # OCR and save text (returns dictionary)
         ocr_result = ocr.extract_text(result["file_path"])
         if not ocr_result["success"]:
             raise Exception(ocr_result["error"])
 
         ocr_path = ocr_result["ocr_text_path"]
 
-        # Extract
         parsed_data = extractor.extract_invoice_data(ocr_result["text"])
 
-        # Store (Logic contains retry/upsert internally)
         storage.store_invoice(
             result["file_name"],
             result["file_hash"],
@@ -40,7 +37,6 @@ def process_file(result: dict) -> None:
             failure_reason=None
         )
 
-        # Log final success
         storage.finalize_processing_log(result["log_id"], success=True)
         storage.move_to_processed(result["file_path"])
 
@@ -55,27 +51,23 @@ def main():
     parser.add_argument("--no-email", action="store_true", help="Do not send emails.")
     args = parser.parse_args()
 
+    run_start_time = datetime.now()
+
     logger.info("Starting automated invoice processing cycle (Mock: %s). Dry-run: %s, No-email: %s", config.MOCK_EXTRACTOR, args.dry_run, args.no_email)
 
-    # 0. Initialize DB (Migration safety)
     db.init_db()
 
-    # 1. Intake
     intake_results = intake.scan_input_folder()
 
-    # 2. Process
     for result in intake_results:
         if result["status"] == "ready":
              process_file(result)
 
-
-    # 3. Report
     until = datetime.now()
-    since = until - timedelta(days=1)
+    since = run_start_time
 
     excel_path, html = reporter.run_reporter(since, until)
 
-    # 4. Email
     if not args.no_email:
         subject = f"Invoice Processing Report: {datetime.now().strftime('%Y-%m-%d')} ({len(intake_results)} files)"
         if config.MOCK_EXTRACTOR:

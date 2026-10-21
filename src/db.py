@@ -51,7 +51,7 @@ CREATE_INVOICE_DOCUMENTS = """
 CREATE TABLE IF NOT EXISTS invoice_documents (
     document_id     INT             AUTO_INCREMENT PRIMARY KEY,
     file_name       VARCHAR(500)    NOT NULL UNIQUE,
-    file_hash       CHAR(64)        NULL,
+    file_hash       VARCHAR(128)    NULL,
     invoice_number  VARCHAR(50),
     invoice_date    DATE,
     vendor_name     VARCHAR(200),
@@ -133,6 +133,7 @@ def _apply_v1(conn: mysql.connector.MySQLConnection) -> None:
     finally:
         cursor.close()
 
+
 def _apply_v2_migration(conn: mysql.connector.MySQLConnection) -> None:
     """Version 2 — add metadata columns and unique hash safely."""
     cursor = conn.cursor()
@@ -170,6 +171,7 @@ def _apply_v2_migration(conn: mysql.connector.MySQLConnection) -> None:
     finally:
         cursor.close()
 
+
 def _apply_v3_migration(conn: mysql.connector.MySQLConnection) -> None:
     """Version 3 — make file_hash nullable for failed invoices."""
     cursor = conn.cursor()
@@ -183,22 +185,35 @@ def _apply_v3_migration(conn: mysql.connector.MySQLConnection) -> None:
     finally:
         cursor.close()
 
+
 def _apply_v4_migration(conn: mysql.connector.MySQLConnection) -> None:
-    """Version 4 — create duplicate_files table, migrate old duplicate_skipped rows, remove from invoice_documents."""
+    """
+    Version 4 — create duplicate_files table, migrate old status='duplicate_skipped' rows.
+
+    NOTE: DDL statements (like CREATE TABLE) cause an implicit commit in MySQL.
+    The subsequent data migration and cleanup run inside an explicit transaction (conn.commit / conn.rollback).
+    """
     cursor = conn.cursor()
     try:
+        # DDL statement — auto-commits in MySQL
         cursor.execute(CREATE_DUPLICATE_FILES)
 
-        # Migrate any existing duplicate_skipped rows to duplicate_files
+        # Count how many old duplicate rows have NULL file_hash
+        cursor.execute("SELECT COUNT(*) FROM invoice_documents WHERE status = 'duplicate_skipped' AND file_hash IS NULL")
+        null_hash_count = cursor.fetchone()[0]
+        if null_hash_count > 0:
+            logger.warning("Skipping %d duplicate_skipped rows with NULL file_hash during v4 migration.", null_hash_count)
+
+        # Migrate non-null file_hash rows
         cursor.execute("""
             INSERT INTO duplicate_files (file_name, file_hash, original_file, skipped_at)
-            SELECT file_name, COALESCE(file_hash, 'UNKNOWN'), COALESCE(original_file, 'UNKNOWN'), processed_at
+            SELECT file_name, file_hash, COALESCE(original_file, 'unknown'), processed_at
             FROM invoice_documents
-            WHERE status = 'duplicate_skipped'
+            WHERE status = 'duplicate_skipped' AND file_hash IS NOT NULL
         """)
 
-        # Delete duplicate_skipped rows from invoice_documents
-        cursor.execute("DELETE FROM invoice_documents WHERE status = 'duplicate_skipped'")
+        # Delete migrated duplicate_skipped rows from invoice_documents (only those with file_hash IS NOT NULL)
+        cursor.execute("DELETE FROM invoice_documents WHERE status = 'duplicate_skipped' AND file_hash IS NOT NULL")
 
         conn.commit()
         logger.info("Applied schema version 4.")
@@ -207,6 +222,7 @@ def _apply_v4_migration(conn: mysql.connector.MySQLConnection) -> None:
         raise
     finally:
         cursor.close()
+
 
 # Map of version -> migration function.
 MIGRATIONS = {

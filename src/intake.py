@@ -24,8 +24,6 @@ from src.db import get_connection, row_to_dict
 logger = logging.getLogger(__name__)
 
 
-# ── Helpers ───────────────────────────────────────────────────
-
 def compute_file_hash(file_path: Path) -> str:
     """Return the SHA-256 hex digest of a file's contents."""
     h = hashlib.sha256()
@@ -42,23 +40,15 @@ def sanitize_filename(name: str) -> str:
     This does NOT rename the original file; it returns a safe version
     for use in output paths, appending a counter if a collision occurs.
     """
-    # Strip directory separators and null bytes
     name = name.replace("/", "_").replace("\\", "_").replace("\0", "")
-    # Collapse sequences of dots that could mean ".."
     name = re.sub(r"\.{2,}", ".", name)
-    # Remove leading dots (hidden files / traversal)
     name = name.lstrip(".")
-    # Replace any remaining non-safe characters
     name = re.sub(r"[^\w\-. ]", "_", name)
     return name or "unnamed_file"
 
 
 def _is_valid_image(file_path: Path) -> bool:
-    """Return True if Pillow can open and verify the image.
-
-    This function confirms that the file is not empty and possesses
-    a valid, non-corrupted image signature (TIFF, JPEG, PNG, etc.).
-    """
+    """Return True if Pillow can open and verify the image."""
     try:
         with Image.open(file_path) as img:
             img.verify()
@@ -83,6 +73,9 @@ def is_file_valid(file_path: Path) -> tuple[bool, str]:
 
     Returns (ok, reason).  `reason` is empty on success.
     """
+    if not file_path.exists():
+        return False, "File does not exist"
+
     ext = file_path.suffix.lower()
 
     if ext not in config.SUPPORTED_EXTENSIONS:
@@ -95,14 +88,11 @@ def is_file_valid(file_path: Path) -> tuple[bool, str]:
         if not _is_valid_pdf(file_path):
             return False, "File does not appear to be a valid PDF"
     else:
-        # Image formats
         if not _is_valid_image(file_path):
             return False, "File is not a readable image"
 
     return True, ""
 
-
-# ── Duplicate detection ───────────────────────────────────────
 
 def get_original_file_name_by_hash(file_hash: str) -> str | None:
     """Return the filename for a given file_hash from successful/reviewed documents."""
@@ -148,14 +138,11 @@ def is_filename_known(file_name: str) -> bool:
         conn.close()
 
 
-# ── File routing ──────────────────────────────────────────────
-
 def move_to_failed(file_path: Path, reason: str) -> Path:
     """Move a file to the failed_invoices folder and log the reason."""
     failed_dir = config.FAILED_DIR
     failed_dir.mkdir(parents=True, exist_ok=True)
     dest = failed_dir / file_path.name
-    # Avoid overwriting an existing file in failed_invoices
     if dest.exists():
         stem = dest.stem
         ext = dest.suffix
@@ -205,25 +192,7 @@ def _log_processing_end(log_id: int, status: str,
         conn.close()
 
 
-# ── Main intake function ─────────────────────────────────────
-
 def scan_input_folder() -> list[dict]:
-    """
-    Scan input_invoices/ and return a list of intake results.
-
-    Each result dict contains:
-        file_path   — Path to the file (still in input_invoices/)
-        file_name   — Sanitized filename
-        file_hash   — SHA-256 hex digest
-        log_id      — processing_logs row id
-        status      — 'ready' | 'skipped_duplicate' | 'failed'
-        reason      — empty on success, explanation on skip/fail
-
-    Files that fail validation or are duplicates are routed
-    immediately (moved to failed_invoices/ or skipped).
-    Files with status 'ready' remain in input_invoices/ for
-    the next pipeline stage (OCR).
-    """
     input_dir = config.INPUT_DIR
     input_dir.mkdir(parents=True, exist_ok=True)
     results: list[dict] = []
@@ -240,22 +209,22 @@ def scan_input_folder() -> list[dict]:
     logger.info("Found %d file(s) in %s", len(files), input_dir)
 
     seen_hashes: set[str] = set()
-    seen_filenames: set[str] = set()
+    seen_filenames: set[tuple[str, str]] = set()
 
     for file_path in files:
-        # Store the ORIGINAL filename, not the sanitized one
         original_name = file_path.name
         log_id = _log_processing_start(original_name)
 
-        # ── Validate ──────────────────────────────────────────
-        ok, reason = is_file_valid(file_path)
-        if not ok:
-            # Corrupt files: compute hash if possible, otherwise NULL
+        if file_path.exists() and file_path.stat().st_size == 0:
+            file_hash = None
+        else:
             try:
                 file_hash = compute_file_hash(file_path)
             except Exception:
                 file_hash = None
 
+        ok, reason = is_file_valid(file_path)
+        if not ok:
             storage.store_failed_invoice(original_name, file_hash, reason)
             move_to_failed(file_path, reason)
             _log_processing_end(log_id, "failed", reason)
@@ -269,15 +238,30 @@ def scan_input_folder() -> list[dict]:
             })
             continue
 
-        # ── Hash & dedup ──────────────────────────────────────
-        file_hash = compute_file_hash(file_path)
+        # Valid file but hash computation failed — treat as failed
+        if file_hash is None:
+            reason = "Could not compute file hash"
+            storage.store_failed_invoice(original_name, None, reason)
+            move_to_failed(file_path, reason)
+            _log_processing_end(log_id, "failed", reason)
+            results.append({
+                "file_path": file_path,
+                "file_name": original_name,
+                "file_hash": None,
+                "log_id": log_id,
+                "status": "failed",
+                "reason": reason,
+            })
+            continue
 
-        # Check in-batch duplicate first
         if file_hash in seen_hashes:
             reason = "Duplicate file (hash already seen in current batch)"
-            # Find the first filename with this hash in this batch
             original_file = next((fn for fn, fh in seen_filenames if fh == file_hash), "unknown")
             storage.store_duplicate(original_name, file_hash, original_file)
+            try:
+                storage.move_to_processed(file_path)
+            except Exception:
+                file_path.unlink(missing_ok=True)
             _log_processing_end(log_id, "duplicate_skipped", reason)
             results.append({
                 "file_path": file_path,
@@ -293,6 +277,10 @@ def scan_input_folder() -> list[dict]:
             reason = "Duplicate file (hash already in database)"
             original_file = get_original_file_name_by_hash(file_hash)
             storage.store_duplicate(original_name, file_hash, original_file or "unknown")
+            try:
+                storage.move_to_processed(file_path)
+            except Exception:
+                file_path.unlink(missing_ok=True)
             _log_processing_end(log_id, "duplicate_skipped", reason)
             results.append({
                 "file_path": file_path,
@@ -305,23 +293,15 @@ def scan_input_folder() -> list[dict]:
             continue
 
         if is_filename_known(original_name):
-            reason = "Filename already exists in database"
-            move_to_failed(file_path, reason)
-            _log_processing_end(log_id, "failed", reason)
-            results.append({
-                "file_path": file_path,
-                "file_name": original_name,
-                "file_hash": file_hash,
-                "log_id": log_id,
-                "status": "skipped_duplicate",
-                "reason": reason,
-            })
-            continue
+            # Same filename + different hash = store under unique name
+            stem = file_path.stem
+            ext = file_path.suffix
+            original_name = f"{stem}_{file_hash[:8]}{ext}"
+            logger.info("Filename collision with different hash; storing as %s", original_name)
 
         seen_hashes.add(file_hash)
         seen_filenames.add((original_name, file_hash))
 
-        # ── Ready for OCR ─────────────────────────────────────
         logger.info("Ready for OCR: %s (hash: %s…)", original_name, file_hash[:12])
         results.append({
             "file_path": file_path,

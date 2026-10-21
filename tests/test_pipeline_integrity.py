@@ -176,6 +176,22 @@ def test_pipeline_mixed_batch(monkeypatch):
     from src.main import process_file
 
     monkeypatch.setattr(config, "MOCK_EXTRACTOR", True)
+    monkeypatch.setattr(extractor, "extract_invoice_data", lambda text: {
+        "invoice_number": "MOCK-1234",
+        "invoice_date": "2026-09-30",
+        "vendor_name": "Mock Stationery",
+        "total_amount": 2000.00,
+        "currency": "INR",
+        "line_items": [
+            {
+                "description": "Mock Item",
+                "quantity": 50.0,
+                "unit_price": 40.0,
+                "line_total": 2000.0,
+            }
+        ],
+        "confidence": "high",
+    })
 
     valid_img = Image.new("RGB", (200, 200), color="blue")
     valid_path = config.INPUT_DIR / "good.png"

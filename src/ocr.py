@@ -89,12 +89,20 @@ def _deskew(img: np.ndarray) -> np.ndarray:
     return rotated
 
 
-def preprocess_image(img: np.ndarray) -> np.ndarray:
+def preprocess_image(image_input: np.ndarray | Path | str) -> np.ndarray:
     """
     Full preprocessing pipeline for a scanned invoice image.
 
-    Steps: grayscale → denoise → contrast → deskew → threshold.
+    Accepts a numpy array or a path to an image file.
+    Steps: load (if path) → grayscale → denoise → contrast → deskew → threshold.
     """
+    if isinstance(image_input, (Path, str)):
+        img = cv2.imread(str(image_input))
+        if img is None:
+            raise ValueError(f"Could not read image from {image_input}")
+    else:
+        img = image_input
+
     img = _to_grayscale(img)
     img = _denoise(img)
     img = _enhance_contrast(img)

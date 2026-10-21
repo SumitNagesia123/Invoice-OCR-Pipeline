@@ -50,7 +50,6 @@ def _validate_date(value: str | None) -> str | None:
     if not _ISO_DATE_RE.match(value):
         logger.warning("Invalid date format, discarding: %r", value)
         return None
-    # Verify it's a real date
     try:
         datetime.strptime(value, "%Y-%m-%d")
     except ValueError:
@@ -184,20 +183,18 @@ def store_invoice(
     if failure_reason:
         status = "failed"
     else:
-        # Determine status based on confidence
         confidence = validated["confidence"]
         if confidence == "high":
             status = "success"
         else:
             status = "needs_review"
 
-    # Make ocr_text_path relative
     if ocr_text_path:
         ocr_path = Path(ocr_text_path)
         try:
             ocr_path = ocr_path.relative_to(config.PROJECT_ROOT)
         except ValueError:
-            pass # Keep as is if not relative
+            pass
         ocr_path_str = str(ocr_path)
     else:
         ocr_path_str = None
@@ -205,7 +202,6 @@ def store_invoice(
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        # UPSERT logic: Insert invoice or update if failed/needs_review
         cursor.execute(
             """
             INSERT INTO invoice_documents
@@ -241,12 +237,10 @@ def store_invoice(
             ),
         )
         document_id = cursor.lastrowid
-        # If it was an update, lastrowid might be 0, need to fetch the ID
         if document_id == 0:
             cursor.execute("SELECT document_id FROM invoice_documents WHERE file_name = %s", (file_name,))
             document_id = cursor.fetchone()[0]
 
-        # Insert line items
         for item in validated["line_items"]:
             cursor.execute(
                 """
@@ -278,7 +272,45 @@ def store_invoice(
         conn.close()
 
 
-# ── Processing-log update ────────────────────────────────────
+def store_failed_invoice(file_name: str, file_hash: str | None, failure_reason: str) -> None:
+    """
+    Store or update a failed invoice record, allowing retries.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO invoice_documents
+                (file_name, file_hash, status, failure_reason)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                status = 'failed',
+                failure_reason = VALUES(failure_reason),
+                file_hash = VALUES(file_hash)
+        """, (file_name, file_hash, 'failed', failure_reason))
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def store_duplicate(file_name: str, file_hash: str, original_file: str) -> None:
+    """
+    Record that a duplicate invoice file was skipped in duplicate_files.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO duplicate_files
+                (file_name, file_hash, original_file)
+            VALUES (%s, %s, %s)
+        """, (file_name, file_hash, original_file))
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
 
 def finalize_processing_log(
     log_id: int,
@@ -312,8 +344,6 @@ def finalize_processing_log(
         conn.close()
 
 
-# ── File routing ─────────────────────────────────────────────
-
 def move_to_processed(file_path: Path) -> Path:
     """
     Move a successfully-processed file to processed_invoices/.
@@ -323,7 +353,6 @@ def move_to_processed(file_path: Path) -> Path:
     processed_dir = config.PROCESSED_DIR
     processed_dir.mkdir(parents=True, exist_ok=True)
     dest = processed_dir / file_path.name
-    # Avoid overwriting
     if dest.exists():
         stem = dest.stem
         ext = dest.suffix
@@ -335,42 +364,6 @@ def move_to_processed(file_path: Path) -> Path:
     logger.info("Moved to processed: %s → %s", file_path.name, dest.name)
     return dest
 
-
-def store_failed_invoice(file_name: str, file_hash: str | None, failure_reason: str) -> None:
-    """
-    Store or update a failed invoice record, allowing retries.
-    """
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("""
-            INSERT INTO invoice_documents
-                (file_name, file_hash, status, failure_reason)
-            VALUES (%s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-                status = 'failed',
-                failure_reason = VALUES(failure_reason),
-                file_hash = VALUES(file_hash)
-        """, (file_name, file_hash, 'failed', failure_reason))
-        conn.commit()
-    finally:
-        cursor.close(); conn.close()
-
-def store_duplicate(file_name: str, file_hash: str, original_file: str) -> None:
-    """
-    Record that a duplicate invoice file was skipped in duplicate_files.
-    """
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("""
-            INSERT INTO duplicate_files
-                (file_name, file_hash, original_file)
-            VALUES (%s, %s, %s)
-        """, (file_name, file_hash, original_file))
-        conn.commit()
-    finally:
-        cursor.close(); conn.close()
 
 def get_invoice_by_id(document_id: int) -> dict[str, Any] | None:
     """Retrieve an invoice_documents row by its ID."""
@@ -388,7 +381,6 @@ def get_invoice_by_id(document_id: int) -> dict[str, Any] | None:
     finally:
         cursor.close()
         conn.close()
-
 
 
 def get_line_items(document_id: int) -> list[dict[str, Any]]:

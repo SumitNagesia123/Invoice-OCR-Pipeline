@@ -21,7 +21,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src import config
-from src.db import init_db, get_connection
+from src.db import get_connection
+from tests.db_setup import init_db_for_test
 from src.storage import (
     _validate_invoice_number,
     _validate_date,
@@ -44,24 +45,20 @@ class _TempDBTestCase(unittest.TestCase):
 
     def setUp(self):
         self.tmpdir = Path(tempfile.mkdtemp())
-        self.data_dir = self.tmpdir / "data"
         self.processed_dir = self.tmpdir / "processed_invoices"
         self.input_dir = self.tmpdir / "input_invoices"
 
-        for d in (self.data_dir, self.processed_dir, self.input_dir):
+        for d in (self.processed_dir, self.input_dir):
             d.mkdir()
 
-        self.db_path = self.data_dir / "test.db"
-
         self._patches = [
-            patch.object(config, "DATABASE_PATH", self.db_path),
             patch.object(config, "PROCESSED_DIR", self.processed_dir),
             patch.object(config, "INPUT_DIR", self.input_dir),
         ]
         for p in self._patches:
             p.start()
 
-        init_db()
+        init_db_for_test()
 
     def tearDown(self):
         for p in self._patches:
@@ -77,15 +74,18 @@ class _TempDBTestCase(unittest.TestCase):
     def _insert_processing_log(self, file_name: str = "test.png") -> int:
         """Insert a processing_logs row and return its log_id."""
         conn = get_connection()
+        cursor = conn.cursor()
         try:
-            cur = conn.execute(
+            cursor.execute(
                 "INSERT INTO processing_logs (file_name, start_time, status) "
-                "VALUES (?, datetime('now'), 'running')",
+                "VALUES (%s, NOW(), 'running')",
                 (file_name,),
             )
+            log_id = cursor.lastrowid
             conn.commit()
-            return cur.lastrowid
+            return log_id
         finally:
+            cursor.close()
             conn.close()
 
     @staticmethod
@@ -347,17 +347,17 @@ class TestStoreInvoice(_TempDBTestCase):
         items = get_line_items(doc_id)
         self.assertEqual(items, [])
 
-    def test_duplicate_filename_raises(self):
+    def test_duplicate_filename_upserts(self):
         parsed = self._make_parsed()
-        store_invoice("dup.png", "hash1", None, parsed)
-        with self.assertRaises(Exception):
-            store_invoice("dup.png", "hash2", None, parsed)
+        doc_id1 = store_invoice("dup.png", "hash1", None, parsed)
+        doc_id2 = store_invoice("dup.png", "hash2", None, parsed)
+        self.assertGreater(doc_id2, 0)
 
     def test_ocr_text_path_stored(self):
         parsed = self._make_parsed()
         doc_id = store_invoice("inv6.png", "pqr678", "/ocr/inv6.txt", parsed)
         row = get_invoice_by_id(doc_id)
-        self.assertEqual(row["ocr_text_path"], "/ocr/inv6.txt")
+        self.assertEqual(Path(row["ocr_text_path"]), Path("/ocr/inv6.txt"))
 
     def test_none_ocr_text_path(self):
         parsed = self._make_parsed()

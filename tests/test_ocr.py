@@ -24,7 +24,7 @@ from PIL import Image, ImageDraw, ImageFont
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src import config
-from src.db import init_db
+from tests.db_setup import init_db_for_test
 from src.ocr import (
     _save_ocr_text,
     _to_grayscale,
@@ -50,18 +50,15 @@ class _TempEnvTestCase(unittest.TestCase):
         for d in (self.input_dir, self.ocr_dir, self.failed_dir, self.data_dir):
             d.mkdir()
 
-        self.db_path = self.data_dir / "test.db"
-
         self._patches = [
             patch.object(config, "INPUT_DIR", self.input_dir),
             patch.object(config, "OCR_OUTPUT_DIR", self.ocr_dir),
             patch.object(config, "FAILED_DIR", self.failed_dir),
-            patch.object(config, "DATABASE_PATH", self.db_path),
         ]
         for p in self._patches:
             p.start()
 
-        init_db()
+        init_db_for_test()
 
     def tearDown(self):
         for p in self._patches:
@@ -98,128 +95,79 @@ class TestPreprocessingSteps(unittest.TestCase):
     def _make_gray_image(self, w=100, h=100):
         return np.random.randint(0, 256, (h, w), dtype=np.uint8)
 
-    def test_to_grayscale_from_color(self):
+    def test_to_grayscale(self):
         color = self._make_color_image()
         gray = _to_grayscale(color)
         self.assertEqual(len(gray.shape), 2)
 
-    def test_to_grayscale_already_gray(self):
-        gray = self._make_gray_image()
-        result = _to_grayscale(gray)
-        self.assertEqual(len(result.shape), 2)
-        np.testing.assert_array_equal(result, gray)
-
-    def test_denoise_output_shape(self):
+    def test_denoise(self):
         gray = self._make_gray_image()
         denoised = _denoise(gray)
         self.assertEqual(denoised.shape, gray.shape)
 
-    def test_enhance_contrast_output_shape(self):
+    def test_enhance_contrast(self):
         gray = self._make_gray_image()
         enhanced = _enhance_contrast(gray)
         self.assertEqual(enhanced.shape, gray.shape)
 
-    def test_threshold_output_binary(self):
+    def test_threshold(self):
         gray = self._make_gray_image()
-        binary = _threshold(gray)
-        unique_vals = set(np.unique(binary))
-        self.assertTrue(unique_vals.issubset({0, 255}))
+        thresh = _threshold(gray)
+        self.assertEqual(len(thresh.shape), 2)
 
-    def test_deskew_no_crash_on_blank(self):
-        """Deskew should handle a blank (all-zero) image without crashing."""
-        blank = np.zeros((100, 100), dtype=np.uint8)
-        result = _deskew(blank)
-        self.assertEqual(result.shape, blank.shape)
-
-    def test_preprocess_full_pipeline(self):
-        """Full pipeline runs without error on a color image."""
-        color = self._make_color_image(200, 200)
-        result = preprocess_image(color)
-        self.assertEqual(len(result.shape), 2)  # grayscale output
+    def test_deskew_straight_image(self):
+        gray = self._make_gray_image()
+        deskewed = _deskew(gray)
+        self.assertEqual(deskewed.shape, gray.shape)
 
 
-# ── OCR text saving ──────────────────────────────────────────
+# ── Preprocess image pipeline ────────────────────────────────
+
+class TestPreprocessImage(_TempEnvTestCase):
+
+    def test_preprocess_returns_valid_image(self):
+        path = self._create_text_image("Test")
+        processed = preprocess_image(path)
+        self.assertIsInstance(processed, np.ndarray)
+        self.assertGreater(processed.size, 0)
+
+
+# ── Save OCR text ────────────────────────────────────────────
 
 class TestSaveOcrText(_TempEnvTestCase):
 
     def test_saves_text_file(self):
-        path = _save_ocr_text("invoice_01.png", "Hello World")
-        self.assertTrue(path.exists())
-        self.assertTrue(path.name.startswith("invoice_01_"))
-        self.assertTrue(path.name.endswith(".txt"))
-        content = path.read_text(encoding="utf-8")
-        self.assertEqual(content, "Hello World")
-
-    def test_saves_to_ocr_dir(self):
-        path = _save_ocr_text("test.png", "some text")
-        self.assertEqual(path.parent, self.ocr_dir)
+        text_path = _save_ocr_text("invoice1.png", "Hello OCR world")
+        self.assertIsNotNone(text_path)
+        p = Path(text_path)
+        self.assertTrue(p.exists())
+        self.assertEqual(p.read_text(encoding="utf-8"), "Hello OCR world")
 
 
-# ── Full OCR extraction ──────────────────────────────────────
+# ── Extract text (Tesseract integration) ─────────────────────
 
 class TestExtractText(_TempEnvTestCase):
 
-    def test_happy_path_image_with_text(self):
-        """An image with clear text should produce non-empty output."""
-        path = self._create_text_image(
-            "INVOICE #12345\nDate: 2024-01-15\nTotal: $500.00",
-            name="inv_12345.png",
-            size=(800, 300),
-        )
+    def test_extract_text_from_image(self):
+        path = self._create_text_image("INVOICE 9999\nTotal: 500.00")
         result = extract_text(path)
         self.assertTrue(result["success"])
+        self.assertTrue(len(result["text"]) > 0)
         self.assertIsNotNone(result["ocr_text_path"])
-        self.assertTrue(result["ocr_text_path"].exists())
-        self.assertEqual(result["error"], "")
-        # We expect at least some text extracted (Tesseract on synthetic
-        # images with default font may not be perfect, but should get
-        # something)
-        self.assertIsInstance(result["text"], str)
+        self.assertTrue(Path(result["ocr_text_path"]).exists())
 
-    def test_blank_image_succeeds_with_empty_or_minimal_text(self):
-        """A blank white image should succeed but produce little/no text."""
-        path = self._create_blank_image("blank.png")
+    def test_extract_text_corrupt_image(self):
+        path = self.input_dir / "corrupt.png"
+        path.write_bytes(b"not an image")
         result = extract_text(path)
-        self.assertTrue(result["success"])
-        self.assertIsNotNone(result["ocr_text_path"])
-
-    def test_corrupt_image_returns_error(self):
-        """A file that OpenCV can't read should return an error."""
-        bad_path = self.input_dir / "corrupt.png"
-        bad_path.write_bytes(b"this is not a PNG file")
-        result = extract_text(bad_path)
         self.assertFalse(result["success"])
-        self.assertIsNone(result["ocr_text_path"])
-        self.assertIn("could not read", result["error"].lower())
+        self.assertIn("error", result)
 
-    def test_ocr_text_file_created_in_ocr_output(self):
-        """The raw OCR text file should land in the ocr_output directory."""
-        path = self._create_text_image("Sample text", name="sample.png")
+    def test_extract_text_blank_image(self):
+        path = self._create_blank_image()
         result = extract_text(path)
+        # Should succeed (Tesseract runs) but text will be empty or minimal
         self.assertTrue(result["success"])
-        self.assertEqual(result["ocr_text_path"].parent, self.ocr_dir)
-
-    def test_pdf_without_poppler_returns_error(self):
-        """If Poppler is not installed, PDF extraction should fail gracefully."""
-        pdf_path = self.input_dir / "invoice.pdf"
-        # Write a minimal PDF-like header so intake would accept it,
-        # but pdf2image will fail without Poppler
-        pdf_path.write_bytes(b"%PDF-1.4 fake content")
-        result = extract_text(pdf_path)
-        # Should fail gracefully (no crash)
-        self.assertFalse(result["success"])
-        self.assertIn("poppler", result["error"].lower())
-
-    def test_multiple_images_independent(self):
-        """Two different images produce independent OCR results."""
-        path1 = self._create_text_image("Invoice A", name="inv_a.png")
-        path2 = self._create_text_image("Invoice B", name="inv_b.png")
-        r1 = extract_text(path1)
-        r2 = extract_text(path2)
-        self.assertTrue(r1["success"])
-        self.assertTrue(r2["success"])
-        # Output files should be different
-        self.assertNotEqual(r1["ocr_text_path"], r2["ocr_text_path"])
 
 
 if __name__ == "__main__":

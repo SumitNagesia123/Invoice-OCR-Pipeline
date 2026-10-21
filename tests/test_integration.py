@@ -17,7 +17,8 @@ from PIL import Image, ImageDraw
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src import config
-from src.db import init_db, get_connection
+from src.db import get_connection
+from tests.db_setup import init_db_for_test
 from src import intake, ocr, parser, storage
 
 class _TempDBTestCase(unittest.TestCase):
@@ -25,20 +26,16 @@ class _TempDBTestCase(unittest.TestCase):
 
     def setUp(self):
         self.tmpdir = Path(tempfile.mkdtemp())
-        self.data_dir = self.tmpdir / "data"
         self.processed_dir = self.tmpdir / "processed_invoices"
         self.input_dir = self.tmpdir / "input_invoices"
         self.failed_dir = self.tmpdir / "failed_invoices"
         self.ocr_output_dir = self.tmpdir / "ocr_output"
 
-        for d in (self.data_dir, self.processed_dir, self.input_dir,
+        for d in (self.processed_dir, self.input_dir,
                   self.failed_dir, self.ocr_output_dir):
             d.mkdir()
 
-        self.db_path = self.data_dir / "test.db"
-
         self._patches = [
-            patch.object(config, "DATABASE_PATH", self.db_path),
             patch.object(config, "PROCESSED_DIR", self.processed_dir),
             patch.object(config, "INPUT_DIR", self.input_dir),
             patch.object(config, "FAILED_DIR", self.failed_dir),
@@ -47,7 +44,7 @@ class _TempDBTestCase(unittest.TestCase):
         for p in self._patches:
             p.start()
 
-        init_db()
+        init_db_for_test()
 
     def tearDown(self):
         for p in self._patches:
@@ -59,9 +56,7 @@ class _TempDBTestCase(unittest.TestCase):
         from PIL import ImageFont
         img = Image.new("RGB", (1200, 600), color="white")
         draw = ImageDraw.Draw(img)
-        # Try to use a larger font for readability
         try:
-            # On Windows, arial.ttf is usually available
             font = ImageFont.truetype("arial.ttf", 36)
         except OSError:
             font = ImageFont.load_default()
@@ -148,9 +143,9 @@ class TestFullPipelineIntegration(_TempDBTestCase):
 
         # Second Intake should detect duplicate
         intake_results = intake.scan_input_folder()
-        self.assertEqual(len(intake_results), 1)                # It finds it
-        self.assertEqual(intake_results[0]["status"], "skipped_duplicate") # It should be marked skipped
-        self.assertIn("Duplicate", intake_results[0]["reason"])
+        self.assertEqual(len(intake_results), 1)
+        self.assertEqual(intake_results[0]["status"], "duplicate_skipped")
+        self.assertIn("duplicate", intake_results[0]["reason"].lower())
 
     def test_pipeline_corrupt_file_handling(self):
         # Create non-image file

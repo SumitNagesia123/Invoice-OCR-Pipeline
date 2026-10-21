@@ -13,9 +13,6 @@ from src import config, schema
 
 logger = logging.getLogger(__name__)
 
-# NOTE: This assumes an ANTHROPIC_API_KEY is available in the .env file.
-client = Anthropic()
-
 SYSTEM_PROMPT = """
 You are an expert invoice data extraction assistant.
 Extract the following fields from the provided OCR text and return ONLY valid JSON.
@@ -39,10 +36,8 @@ def extract_invoice_data(ocr_text: str) -> dict[str, Any]:
 
     if config.MOCK_EXTRACTOR:
         logger.info("Mock mode enabled: returning dummy extraction data.")
-        # 90% valid, 10% invalid
         mode = random.random()
         if mode < 0.90:
-            # 90% Valid data with high confidence
             return {
                 "invoice_number": f"MOCK-{random.randint(1000, 9999)}",
                 "invoice_date": "2026-09-30",
@@ -60,12 +55,11 @@ def extract_invoice_data(ocr_text: str) -> dict[str, Any]:
                 "confidence": "high",
             }
         elif mode < 0.95:
-            # 5% Needs Review (e.g. missing total)
             return {
                 "invoice_number": f"MOCK-{random.randint(1000, 9999)}",
                 "invoice_date": "2026-09-30",
                 "vendor_name": "Mock Stationery",
-                "total_amount": None, # Missing total
+                "total_amount": None,
                 "currency": "INR",
                 "line_items": [
                     {
@@ -78,12 +72,11 @@ def extract_invoice_data(ocr_text: str) -> dict[str, Any]:
                 "confidence": "low",
             }
         else:
-            # 5% Deliberately invalid fail (e.g. mismatched sums)
             return {
                 "invoice_number": f"MOCK-{random.randint(1000, 9999)}",
                 "invoice_date": "2026-09-30",
                 "vendor_name": "Mock Fail",
-                "total_amount": 500.0, # Mismatched sum
+                "total_amount": 500.0,
                 "currency": "INR",
                 "line_items": [
                     {
@@ -96,6 +89,7 @@ def extract_invoice_data(ocr_text: str) -> dict[str, Any]:
                 "confidence": "low",
             }
 
+    client = Anthropic()
     prompt = f"Extract invoice data from the following text:\n\n{ocr_text}"
 
     for attempt in range(3):
@@ -107,10 +101,7 @@ def extract_invoice_data(ocr_text: str) -> dict[str, Any]:
                 messages=[{"role": "user", "content": prompt}]
             )
 
-            # Extract content from response
             content = message.content[0].text
-
-            # Attempt to parse JSON
             data = json.loads(content)
             return data
 
@@ -127,17 +118,14 @@ def process_and_validate(ocr_text: str, file_name: str, file_hash: str) -> dict[
     """
     raw_data = extract_invoice_data(ocr_text)
 
-    # Add meta-fields required by schema
     raw_data["file_name"] = file_name
     raw_data["file_hash"] = file_hash
 
-    # Validate against schema
     is_valid, error, validated_model = schema.validate_invoice(raw_data)
 
     if is_valid:
         return validated_model.model_dump()
     else:
-        # Fallback: flag for review
         logger.error(f"Validation failed for {file_name}: {error}")
         raw_data["status"] = "needs_review"
         return raw_data

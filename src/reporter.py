@@ -72,7 +72,6 @@ def create_excel(data, output_path):
 
 def create_html(data):
     """Create HTML report body."""
-    # Run Overview, Financial Summary, etc.
     total = data["total"]
     proc = data["success"]
     rev = data["needs_review"]

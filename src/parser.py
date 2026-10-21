@@ -338,8 +338,11 @@ def _extract_line_items(text: str) -> list[dict[str, Any]]:
 
 def _safe_float(val: str) -> float | None:
     """Convert a string to float, returning None on failure."""
+    if val is None:
+        return None
     try:
-        return float(val.replace(",", ""))
+        cleaned = re.sub(r"[$€£¥\s]", "", str(val))
+        return float(cleaned.replace(",", ""))
     except (ValueError, AttributeError):
         return None
 
