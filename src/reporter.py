@@ -7,11 +7,15 @@ Generates:
 """
 
 import logging
+import warnings
 import pandas as pd
 from datetime import datetime
 from src import config, db
 
 logger = logging.getLogger(__name__)
+
+# Suppress pandas warning about non-SQLAlchemy connectable
+warnings.filterwarnings("ignore", message="pandas only supports SQLAlchemy connectable")
 
 def generate_report_data(since, until):
     """Gather all data needed for reporting."""
@@ -97,7 +101,7 @@ def create_html(data):
         <p style='color: {"green" if check_ok else "red"}'>{check_line}</p>
 
         <h3>Financial Summary</h3>
-        <p>not measured (mock mode)</p>
+        <p>Total Invoiced Amount: {data['invoices']['total_amount'].sum():,.2f} USD</p>
 
         <h3>Needs Review</h3>
         {"<ul>" + "".join([f"<li>{r['file_name']}: {r['review_reason']}</li>" for _, r in data['invoices'][data['invoices']['status'] == 'needs_review'].head(20).iterrows()]) + "</ul>" if rev > 0 else "<p>None</p>"}

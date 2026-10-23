@@ -95,7 +95,7 @@ def extract_invoice_data(ocr_text: str) -> dict[str, Any]:
     for attempt in range(3):
         try:
             message = client.messages.create(
-                model="anthropic/claude-3-5-sonnet-20241022",
+                model="claude-3-5-sonnet-20241022",
                 max_tokens=1024,
                 system=SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": prompt}]

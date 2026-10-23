@@ -29,7 +29,7 @@ from src.reporter import (
 )
 
 
-class TestReporter(_TempDBTestCase if '_TempDBTestCase' in globals() else unittest.TestCase):
+class TestReporter(unittest.TestCase):
     """Test suite for reporter module using MySQL test database."""
 
     def setUp(self):
