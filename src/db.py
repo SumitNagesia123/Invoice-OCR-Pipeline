@@ -51,7 +51,7 @@ CREATE_INVOICE_DOCUMENTS = """
 CREATE TABLE IF NOT EXISTS invoice_documents (
     document_id     INT             AUTO_INCREMENT PRIMARY KEY,
     file_name       VARCHAR(500)    NOT NULL UNIQUE,
-    file_hash       VARCHAR(128)    NULL,
+    file_hash       VARCHAR(128)    NOT NULL,
     invoice_number  VARCHAR(50),
     invoice_date    DATE,
     vendor_name     VARCHAR(200),
@@ -60,9 +60,6 @@ CREATE TABLE IF NOT EXISTS invoice_documents (
     status          VARCHAR(20)     NOT NULL DEFAULT 'needs_review',
     ocr_text_path   VARCHAR(500),
     processed_at    TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
-    review_reason   TEXT            NULL,
-    failure_reason  TEXT            NULL,
-    original_file   VARCHAR(255)    NULL,
     INDEX(file_hash)
 );
 """

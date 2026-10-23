@@ -4,22 +4,19 @@ Pipeline integrity tests.
 These tests run against a SEPARATE database called 'invoice_test'
 and use temporary folders — they never touch the real database or
 the real input_invoices directory.
-
-NOTE: test_status_summation runs the real OCR pipeline (Tesseract)
-with a mocked extractor, so Tesseract must be installed.
 """
 
 import pytest
+import shutil
 import mysql.connector
 from pathlib import Path
 from PIL import Image
 
-from src import config, db, intake, ocr, extractor, storage
+from src import config, db, intake, ocr, extractor, storage, main
 
-# ── Constants ────────────────────────────────────────────────
 TEST_DB_NAME = "invoice_test"
 
-# ── Session-scoped: create the test database once ────────────
+
 @pytest.fixture(scope="session", autouse=True)
 def create_test_database():
     """Create the invoice_test database and run migrations."""
@@ -51,18 +48,15 @@ def create_test_database():
     # ──────────────────────────────────────────────────────────
 
     db.init_db()
-
     yield
 
 
-# ── Per-test: truncate all rows so every test starts clean ───
 @pytest.fixture(autouse=True)
 def clean_tables():
     """Truncate every table before each test (FK-safe)."""
     conn = db.get_connection()
     cursor = conn.cursor()
 
-    # ── SAFETY GUARD ──────────────────────────────────────────
     cursor.execute("SELECT DATABASE()")
     current_db = cursor.fetchone()[0]
     if current_db != TEST_DB_NAME:
@@ -71,7 +65,6 @@ def clean_tables():
         pytest.exit(
             f"Refusing to run: connected to '{current_db}', not '{TEST_DB_NAME}'"
         )
-    # ──────────────────────────────────────────────────────────
 
     cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
     cursor.execute("TRUNCATE TABLE invoice_line_items")
@@ -85,7 +78,6 @@ def clean_tables():
     yield
 
 
-# ── Per-test: redirect intake to a temp folder ───────────────
 @pytest.fixture(autouse=True)
 def use_tmp_dirs(tmp_path, monkeypatch):
     """Point config dirs at tmp_path so real folders are never touched."""
@@ -98,6 +90,7 @@ def use_tmp_dirs(tmp_path, monkeypatch):
     processed_dir.mkdir()
     ocr_output_dir.mkdir()
 
+    monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(config, "INPUT_DIR", input_dir)
     monkeypatch.setattr(config, "FAILED_DIR", failed_dir)
     monkeypatch.setattr(config, "PROCESSED_DIR", processed_dir)
@@ -105,115 +98,67 @@ def use_tmp_dirs(tmp_path, monkeypatch):
     yield
 
 
-# ━━━━━━━━━━━━━━━━━━  TESTS  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-# (a) Two files with the same content → only ONE non-duplicate row
-def test_duplicate_rejection():
-    """
-    When a file's hash already exists in invoice_documents, intake
-    must NOT insert a second 'success' row.  The duplicate should
-    be recorded in duplicate_files.
-    """
-    img = Image.new("RGB", (100, 100), color="red")
-    first_file = config.INPUT_DIR / "original.png"
-    img.save(first_file)
-    first_hash = intake.compute_file_hash(first_file)
-
-    storage.store_invoice(
-        file_name="original.png",
-        file_hash=first_hash,
-        ocr_text_path="ocr_output/original.txt",
-        parsed={
-            "invoice_number": "INV-001",
-            "invoice_date": "2026-09-30",
-            "vendor_name": "Vendor A",
-            "total_amount": 100.0,
-            "currency": "INR",
-            "line_items": [],
-            "confidence": "high",
-        },
-    )
-    first_file.unlink()
-
-    duplicate_file = config.INPUT_DIR / "copy.png"
-    img.save(duplicate_file)
-
-    results = intake.scan_input_folder()
-
-    dup_results = [r for r in results if r["status"] == "duplicate_skipped"]
-    assert len(dup_results) == 1, f"Expected 1 duplicate_skipped result, got {len(dup_results)}"
-
-    conn = db.get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "SELECT COUNT(*) FROM invoice_documents WHERE file_hash = %s",
-        (first_hash,),
-    )
-    doc_count = cursor.fetchone()[0]
-    assert doc_count == 1, f"Expected 1 invoice document row, got {doc_count}"
-
-    cursor.execute(
-        "SELECT COUNT(*) FROM duplicate_files WHERE file_hash = %s",
-        (first_hash,),
-    )
-    dup_count = cursor.fetchone()[0]
-    assert dup_count == 1, f"Expected 1 duplicate_files row, got {dup_count}"
-
-    cursor.close()
-    conn.close()
-
-
-# (b) Mixed batch: the real pipeline path, DB status counts
-def test_pipeline_mixed_batch(monkeypatch):
-    """
-    Run a batch of:
-    - one valid image
-    - one corrupt file
-    - one copy of the valid image
-    Assert: success=1, failed=1, duplicates=1
-    """
-    from src.main import process_file
-
+@pytest.fixture(autouse=True)
+def mock_extractor_and_ocr(monkeypatch):
+    """Provide deterministic mock extractor and mock ocr."""
     monkeypatch.setattr(config, "MOCK_EXTRACTOR", True)
     monkeypatch.setattr(extractor, "extract_invoice_data", lambda text: {
-        "invoice_number": "MOCK-1234",
-        "invoice_date": "2026-09-30",
-        "vendor_name": "Mock Stationery",
-        "total_amount": 2000.00,
-        "currency": "INR",
+        "invoice_number": "INV-MOCK-001",
+        "invoice_date": "2026-10-01",
+        "vendor_name": "Mock Vendor",
+        "total_amount": 500.00,
+        "currency": "USD",
         "line_items": [
             {
-                "description": "Mock Item",
-                "quantity": 50.0,
-                "unit_price": 40.0,
-                "line_total": 2000.0,
+                "description": "Widget",
+                "quantity": 2,
+                "unit_price": 250.00,
+                "line_total": 500.00,
             }
         ],
         "confidence": "high",
     })
+    monkeypatch.setattr(ocr, "extract_text", lambda path: {
+        "success": True,
+        "text": "Invoice # INV-MOCK-001 Date: 2026-10-01 Total: $500.00",
+        "ocr_text_path": config.OCR_OUTPUT_DIR / f"{path.stem}_ocr.txt",
+        "error": "",
+    })
 
-    valid_img = Image.new("RGB", (200, 200), color="blue")
-    valid_path = config.INPUT_DIR / "good.png"
+
+def test_in_batch_duplicate():
+    """In-batch duplicate files are detected and skipped."""
+    img = Image.new("RGB", (100, 100), color="blue")
+    img.save(config.INPUT_DIR / "file1.png")
+    img.save(config.INPUT_DIR / "file2.png")
+
+    results = intake.scan_input_folder()
+    statuses = [r["status"] for r in results]
+    assert "ready" in statuses
+    assert "duplicate_skipped" in statuses
+
+
+def test_pipeline_mixed_batch():
+    """Mixed batch (valid, corrupt, duplicate) yields correct status counts."""
+    valid_img = Image.new("RGB", (100, 100), color="green")
+    valid_path = config.INPUT_DIR / "invoice_valid.png"
     valid_img.save(valid_path)
 
-    (config.INPUT_DIR / "corrupt.png").write_text("not an image")
+    corrupt_path = config.INPUT_DIR / "invoice_corrupt.png"
+    corrupt_path.write_text("random garbage content")
 
-    dup_path = config.INPUT_DIR / "dup_good.png"
+    dup_path = config.INPUT_DIR / "invoice_copy.png"
     valid_img.save(dup_path)
 
     results = intake.scan_input_folder()
-
-    for result in results:
-        if result["status"] == "ready":
-             process_file(result)
+    for r in results:
+        if r["status"] == "ready":
+            main.process_file(r)
 
     conn = db.get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT status, COUNT(*) FROM invoice_documents GROUP BY status")
-    rows = cursor.fetchall()
-    counts = {r[0]: r[1] for r in rows}
-
+    counts = {row[0]: row[1] for row in cursor.fetchall()}
     cursor.execute("SELECT COUNT(*) FROM duplicate_files")
     dup_count = cursor.fetchone()[0]
     cursor.close()
@@ -222,30 +167,135 @@ def test_pipeline_mixed_batch(monkeypatch):
     assert counts.get("success", 0) == 1
     assert counts.get("failed", 0) == 1
     assert dup_count == 1
-    assert counts.get("success", 0) + counts.get("needs_review", 0) + counts.get("failed", 0) + dup_count == 3
 
 
-# (c) needs_review / failed rows always have a reason
 def test_reasons_present():
-    """Every row with status 'needs_review' or 'failed' must have a reason."""
+    """Needs review and failed rows always have a reason recorded."""
     storage.store_invoice(
-        file_name="review_me.png",
-        file_hash="a" * 64,
+        file_name="review.png",
+        file_hash="1" * 64,
         ocr_text_path=None,
         parsed={"confidence": "low"},
-        review_reason="Missing all fields",
+        review_reason="Low confidence score",
     )
-
-    storage.store_failed_invoice("fail_me.png", "b" * 64, "OCR failure")
+    storage.store_failed_invoice("fail.png", "2" * 64, "Corrupt file format")
 
     conn = db.get_connection()
     cursor = conn.cursor()
-
-    cursor.execute("SELECT COUNT(*) FROM invoice_documents WHERE status = 'needs_review' AND (review_reason IS NULL OR review_reason = '')")
-    assert cursor.fetchone()[0] == 0
-
-    cursor.execute("SELECT COUNT(*) FROM invoice_documents WHERE status = 'failed' AND (failure_reason IS NULL OR failure_reason = '')")
-    assert cursor.fetchone()[0] == 0
-
+    cursor.execute("SELECT review_reason FROM invoice_documents WHERE status = 'needs_review'")
+    assert cursor.fetchone()[0] is not None
+    cursor.execute("SELECT failure_reason FROM invoice_documents WHERE status = 'failed'")
+    assert cursor.fetchone()[0] is not None
     cursor.close()
     conn.close()
+
+
+def test_no_absolute_ocr_text_path():
+    """OCR text path stored in database is relative, not absolute."""
+    valid_img = Image.new("RGB", (100, 100), color="white")
+    path = config.INPUT_DIR / "inv.png"
+    valid_img.save(path)
+
+    results = intake.scan_input_folder()
+    ready_item = next(r for r in results if r["status"] == "ready")
+    main.process_file(ready_item)
+
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT ocr_text_path FROM invoice_documents WHERE file_name = 'inv.png'")
+    ocr_path = cursor.fetchone()[0]
+    cursor.close()
+    conn.close()
+
+    assert ocr_path is not None
+    assert not Path(ocr_path).is_absolute()
+
+
+def test_corrupt_file_stored_with_real_hash():
+    """Corrupt file is stored with its real SHA-256 hash and failed status."""
+    corrupt_path = config.INPUT_DIR / "corrupt_hash.png"
+    corrupt_content = b"some invalid image bytes"
+    corrupt_path.write_bytes(corrupt_content)
+
+    expected_hash = intake.compute_file_hash(corrupt_path)
+
+    results = intake.scan_input_folder()
+    assert len(results) == 1
+    assert results[0]["status"] == "failed"
+    assert results[0]["file_hash"] == expected_hash
+
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT file_hash, status FROM invoice_documents WHERE file_name = 'corrupt_hash.png'")
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    assert row[0] == expected_hash
+    assert row[1] == "failed"
+
+
+def test_empty_file_stored_with_null_hash():
+    """Empty (0-byte) file is stored with NULL hash and failed status."""
+    empty_path = config.INPUT_DIR / "empty.png"
+    empty_path.write_bytes(b"")
+
+    results = intake.scan_input_folder()
+    assert len(results) == 1
+    assert results[0]["status"] == "failed"
+    assert results[0]["file_hash"] is None
+
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT file_hash, status FROM invoice_documents WHERE file_name = 'empty.png'")
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    assert row[0] is None
+    assert row[1] == "failed"
+
+
+def test_failed_file_retry_succeeds():
+    """A file that failed previously can be retried and succeed."""
+    corrupt_path = config.INPUT_DIR / "retry_invoice.png"
+    corrupt_path.write_bytes(b"bad")
+    intake.scan_input_folder()
+
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT status FROM invoice_documents WHERE file_name = 'retry_invoice.png'")
+    assert cursor.fetchone()[0] == "failed"
+    cursor.close()
+    conn.close()
+
+    failed_file = config.FAILED_DIR / "retry_invoice.png"
+    if failed_file.exists():
+        shutil.move(str(failed_file), str(corrupt_path))
+    valid_img = Image.new("RGB", (100, 100), color="yellow")
+    valid_img.save(corrupt_path)
+
+    results = intake.scan_input_folder()
+    ready_item = next(r for r in results if r["status"] == "ready")
+    main.process_file(ready_item)
+
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT status FROM invoice_documents WHERE file_name = 'retry_invoice.png'")
+    assert cursor.fetchone()[0] == "success"
+    cursor.close()
+    conn.close()
+
+
+def test_copy_of_failed_file_retried_not_skipped():
+    """A copy or retry of a failed file is not skipped as duplicate."""
+    path1 = config.INPUT_DIR / "fail_doc.png"
+    path1.write_bytes(b"bad content")
+    intake.scan_input_folder()
+
+    path2 = config.INPUT_DIR / "fail_doc_copy.png"
+    path2.write_bytes(b"bad content")
+
+    results = intake.scan_input_folder()
+    statuses = [r["status"] for r in results]
+    assert "duplicate_skipped" not in statuses

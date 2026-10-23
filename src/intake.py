@@ -122,17 +122,17 @@ def is_duplicate(file_hash: str) -> bool:
         conn.close()
 
 
-def is_filename_known(file_name: str) -> bool:
-    """Return True if this filename has already been processed."""
+def get_active_document_by_filename(file_name: str) -> dict | None:
+    """Return dict of file_hash and status for non-failed document with this filename, or None."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "SELECT 1 FROM invoice_documents WHERE file_name = %s",
+            "SELECT file_hash, status FROM invoice_documents WHERE file_name = %s AND status != 'failed' LIMIT 1",
             (file_name,),
         )
         row = cursor.fetchone()
-        return row is not None
+        return row_to_dict(cursor, row) if row else None
     finally:
         cursor.close()
         conn.close()
@@ -292,12 +292,35 @@ def scan_input_folder() -> list[dict]:
             })
             continue
 
-        if is_filename_known(original_name):
-            # Same filename + different hash = store under unique name
-            stem = file_path.stem
-            ext = file_path.suffix
-            original_name = f"{stem}_{file_hash[:8]}{ext}"
-            logger.info("Filename collision with different hash; storing as %s", original_name)
+        # Filename check against database (active / non-failed documents)
+        existing_doc = get_active_document_by_filename(original_name)
+        if existing_doc:
+            existing_hash = existing_doc.get("file_hash")
+            if existing_hash == file_hash:
+                reason = "Duplicate file (same filename and hash already in database)"
+                storage.store_duplicate(original_name, file_hash, original_name)
+                try:
+                    storage.move_to_processed(file_path)
+                except Exception:
+                    file_path.unlink(missing_ok=True)
+                _log_processing_end(log_id, "duplicate_skipped", reason)
+                results.append({
+                    "file_path": file_path,
+                    "file_name": original_name,
+                    "file_hash": file_hash,
+                    "log_id": log_id,
+                    "status": "duplicate_skipped",
+                    "reason": reason,
+                })
+                seen_hashes.add(file_hash)
+                seen_filenames.add((original_name, file_hash))
+                continue
+            else:
+                # Same filename + different hash = store under unique name
+                stem = file_path.stem
+                ext = file_path.suffix
+                original_name = f"{stem}_{file_hash[:8]}{ext}"
+                logger.info("Filename collision with different hash; storing as %s", original_name)
 
         seen_hashes.add(file_hash)
         seen_filenames.add((original_name, file_hash))
