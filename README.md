@@ -1,39 +1,52 @@
 # InvoiceOCR Pipeline
 
-A lightweight, local-first pipeline to process invoices from folders, perform OCR, parse structured data, and store it in a SQLite database.
+A lightweight, local-first pipeline to process invoices from folders, perform OCR, parse structured data via regex or LLM (Claude), and store results in a MySQL database with automated duplicate detection, reporting, and email summaries.
 
 ## Components
-- **`intake.py`**: Monitors an input directory, validates files, and performs duplicate detection.
-- **`ocr.py`**: Converts PDFs/images to text using Tesseract.
-- **`extractor.py`**: Extracts structured fields (invoice number, date, vendor, total, line items) from OCR text using Claude 3.5 Sonnet (LLM) or a mock extractor for testing.
-- **`storage.py`**: Manages SQLite storage for processed documents.
-- **`db.py` / `init_db.py`**: DB schema management and initialization.
-- **`reporter.py`**: Generates and sends daily status email summaries.
-- **`config.py`**: Central configuration (settings, environment variables like MOCK_EXTRACTOR).
+
+- **`intake.py`**: Monitors an input directory, validates files, computes SHA-256 hashes, handles empty files, detects duplicates (batch + database), and routes unreadable or unsupported files to the failed folder.
+- **`ocr.py`**: Converts PDFs and images to text using Tesseract, with a preprocessing pipeline (grayscale, denoising, CLAHE contrast enhancement, deskewing, and adaptive thresholding).
+- **`extractor.py`**: Extracts structured fields (invoice number, date, vendor, total, line items) using Anthropic Claude 3.5 Sonnet or a mock extractor for testing.
+- **`schema.py`**: Validates extracted data using Pydantic models with automatic line total calculation and subtotal/tax/total consistency checks.
+- **`storage.py`**: Manages MySQL storage for processed documents, line items, duplicate logs, and processing logs.
+- **`db.py`**: Database initialization and versioned schema migrations (v1 to v4).
+- **`reporter.py`**: Generates multi-sheet Excel reports and HTML email summaries.
+- **`emailer.py`**: Sends daily summary emails via SMTP with Excel attachments and dry-run/fallback support.
+- **`main.py`**: Orchestrator linking intake, OCR, extraction, storage, reporting, and emailing.
 
 ## Setup
 
-1. **Prerequisites**
-   - Install [Tesseract OCR](https://github.com/tesseract-ocr/tesseract)
-   - Install Poppler (required for PDF processing via `pdf2image` on Windows).
-   - [pyodbc](https://github.com/mkleehammer/pyodbc) and ODBC driver for SQL Server.
+### 1. Prerequisites
+- Install [Tesseract OCR](https://github.com/tesseract-ocr/tesseract)
+- Install Poppler (required for PDF processing via `pdf2image` on Windows).
+- Install a local or remote MySQL server.
 
-2. **Configuration**
-   Create a `.env` file in the project root and fill in the required values:
-   - `TESSERACT_CMD`: Path to `tesseract.exe`.
-   - `POPPLER_PATH`: Path to Poppler's `bin/` directory.
-   - **Database (SQL Server)**: `DB_SERVER`, `DB_NAME`, `DB_DRIVER`, `DB_TRUSTED`, `DB_USER`, `DB_PASSWORD`.
-   - **SMTP settings**: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_TO` (required for automated email summaries).
-   - `MOCK_EXTRACTOR`: Set to `true` to enable mock extraction mode for benchmarking (no LLM costs).
+### 2. Installation
+```bash
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### 3. Configuration
+Copy `.env.example` to `.env` and configure your environment:
+- `TESSERACT_CMD`: Path to `tesseract.exe`.
+- `POPPLER_PATH`: Path to Poppler's `bin/` directory.
+- **Database (MySQL)**: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
+- `MOCK_EXTRACTOR`: Set to `true` for mock extraction (no LLM cost), `false` for live Anthropic API calls.
+- `ANTHROPIC_API_KEY`: Required if `MOCK_EXTRACTOR=false`.
+- **SMTP settings**: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_TO`.
 
 ## Running the Pipeline
-   ```bash
-   python init_db.py
-   python run_pipeline.py
-   ```
-This script scans `input_invoices/`, performs OCR on all supported files (images and PDFs), parses the output, and stores the results in the database. Successful files are moved to `processed_invoices/`, while failed files are moved to `failed_invoices/`.
+
+```bash
+python -m src.main
+```
+
+This scans `input_invoices/`, performs OCR, extracts structured data, and stores results in MySQL. Successful files move to `processed_invoices/`, failed files to `failed_invoices/`.
 
 ## Running Tests
+
 This project uses `pytest`. Run all tests with:
 ```bash
 pytest

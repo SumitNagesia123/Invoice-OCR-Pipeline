@@ -2,16 +2,21 @@
 
 # OCR
 pytesseract>=0.3.10
-Pillow>=10.0.0           # Image preprocessing
+Pillow>=10.0.0                    # Image preprocessing
+opencv-python-headless>=4.8.0     # Image preprocessing (grayscale, deskew, threshold)
+numpy>=1.24.0                     # Array operations for OpenCV
 
 # PDF handling
-pdf2image>=1.16.3        # Convert PDF pages to images
+pdf2image>=1.16.3                 # Convert PDF pages to images
 
 # Database (MySQL)
 mysql-connector-python>=8.4.0
 
 # LLM extraction
 anthropic>=0.30.0
+
+# Validation
+pydantic>=2.0.0                   # Invoice schema validation
 
 # Environment / config
 python-dotenv>=1.0.0
