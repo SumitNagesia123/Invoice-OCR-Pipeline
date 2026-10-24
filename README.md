@@ -14,40 +14,74 @@ A lightweight, local-first pipeline to process invoices from folders, perform OC
 - **`emailer.py`**: Sends daily summary emails via SMTP with Excel attachments and dry-run/fallback support.
 - **`main.py`**: Orchestrator linking intake, OCR, extraction, storage, reporting, and emailing.
 
-## Setup
+---
 
-### 1. Prerequisites
-- Install [Tesseract OCR](https://github.com/tesseract-ocr/tesseract)
-- Install Poppler (required for PDF processing via `pdf2image` on Windows).
-- Install a local or remote MySQL server.
+## Step-by-Step Guide to Run Locally
 
-### 2. Installation
-```bash
-python -m venv venv
-venv\Scripts\activate
+Follow these steps to set up and run the InvoiceOCR pipeline in your local terminal:
+
+### Step 1: Navigate to Project Root
+Open your terminal (PowerShell or Bash) and navigate to the project repository folder.
+
+### Step 2: Install Python Dependencies
+Install the required packages listed in `requirements.txt`:
+```powershell
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 3. Configuration
-Copy `.env.example` to `.env` and configure your environment:
-- `TESSERACT_CMD`: Path to `tesseract.exe`.
-- `POPPLER_PATH`: Path to Poppler's `bin/` directory.
-- **Database (MySQL)**: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
-- `MOCK_EXTRACTOR`: Set to `true` for mock extraction (no LLM cost), `false` for live Anthropic API calls.
-- `ANTHROPIC_API_KEY`: Required if `MOCK_EXTRACTOR=false`.
-- **SMTP settings**: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_TO`.
+### Step 3: Configure External Binaries (Tesseract & Poppler)
+Ensure you have **Tesseract OCR** and **Poppler** installed on your system:
+- **Tesseract OCR**: Download and install from [UB-Mannheim/tesseract](https://github.com/UB-Mannheim/tesseract/wiki).
+- **Poppler (for PDF support)**: Download and install from [Poppler for Windows](https://github.com/oschwartz10612/poppler-windows).
 
-## Running the Pipeline
+### Step 4: Configure Environment Variables (`.env`)
+Copy the example environment file and update it with your MySQL credentials and binary paths:
+```powershell
+Copy-Item .env.example .env
+```
+Open `.env` in your editor and configure:
+```env
+DB_HOST=localhost
+DB_PORT=3306
+DB_NAME=invoice_ocr
+DB_USER=root
+DB_PASSWORD=your_mysql_password
 
-```bash
-python -m src.main
+TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
+POPPLER_PATH=C:\Program Files\poppler\Library\bin
+
+# Set to True if testing without an Anthropic API key
+MOCK_EXTRACTOR=True
+ANTHROPIC_API_KEY=your_actual_api_key_here
 ```
 
-This scans `input_invoices/`, performs OCR, extracts structured data, and stores results in MySQL. Successful files move to `processed_invoices/`, failed files to `failed_invoices/`.
+### Step 5: Initialize the Database
+Run the setup script or let the application initialize the MySQL schema automatically:
+```powershell
+python -c "from src import db; db.init_db(); print('Database initialized successfully!')"
+```
 
-## Running Tests
+### Step 6: Add Invoices to the Input Folder
+Place your invoice files (`.png`, `.jpg`, `.pdf`, etc.) into the `input_invoices/` folder:
+```powershell
+# Optional: generate synthetic sample test invoices
+python -m src.generate_test_data
+```
 
-This project uses `pytest`. Run all tests with:
-```bash
-pytest
+### Step 7: Run the Pipeline
+Execute the main orchestrator to intake, preprocess, OCR, extract, validate, store, and report on all invoices:
+```powershell
+python src/main.py --no-email
+```
+*(Omit `--no-email` if you have configured SMTP settings in your `.env` to receive email summaries).*
+
+### Step 8: View Results & Reports
+- **Database Records**: Query MySQL (`invoice_ocr` database -> `invoice_documents`, `invoice_line_items`, `processing_logs`).
+- **Generated Reports**: Check the `output/` directory for consolidated Excel sheets (`output/all_invoices.xlsx`) and HTML reports (`output/last_report.html`).
+
+### Step 9: Run Tests
+Run all unit, edge-case, and integration tests anytime to verify system health:
+```powershell
+python -m pytest
 ```
